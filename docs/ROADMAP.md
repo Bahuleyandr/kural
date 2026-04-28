@@ -24,10 +24,17 @@
 - Persistent audio library via IndexedDB.
 - True long-document chunk stitching.
 - SSML subset for pauses, emphasis, and pronunciation.
+- Voice-clone import/export archives for local portability.
 - WAV/MP3 export for Kokoro and WAV export for cloned voices.
 - Voice sample preview and clone consent guardrails.
 
+## Release
+
+- Explicit desktop backend runtime provisioning.
+- Release scripts for updater signing configuration.
+- Artifact smoke checks for desktop bundles and updater signatures.
+
 ## Next Candidates
 
-- User-defined voice folders and import/export.
-- Signed desktop installers and auto-update channel.
+- User-defined voice folders.
+- Published signed desktop installers after signing keys and distribution accounts are available.

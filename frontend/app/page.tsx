@@ -274,6 +274,8 @@ export default function Home() {
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloneSuccess, setCloneSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const archiveInputRef = useRef<HTMLInputElement>(null);
+  const [clonePortabilityBusy, setClonePortabilityBusy] = useState(false);
 
   const currentVoiceLabel = useMemo(() => {
     if (!selectedVoice) return "No voice";
@@ -594,6 +596,56 @@ export default function Home() {
     }
   }
 
+  async function handleExportClones() {
+    setClonePortabilityBusy(true);
+    setCloneError(null);
+    setCloneSuccess(null);
+
+    try {
+      const res = await fetch(`${getApiUrl()}/api/voices/clones/export`);
+      if (!res.ok) throw new Error(await readApiError(res));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kural-voices-${Date.now()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setCloneSuccess(`Exported ${clones.length} cloned voice(s)`);
+    } catch (e: unknown) {
+      setCloneError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClonePortabilityBusy(false);
+    }
+  }
+
+  async function handleImportArchive(file: File | null) {
+    if (!file) return;
+    setClonePortabilityBusy(true);
+    setCloneError(null);
+    setCloneSuccess(null);
+
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`${getApiUrl()}/api/voices/clones/import`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const data: { imported?: ClonedVoiceInfo[]; total?: number } = await res.json();
+      const imported = data.imported ?? [];
+      if (imported[0]) setSelectedVoice({ kind: "clone", id: imported[0].id });
+      setCloneSuccess(`Imported ${data.total ?? imported.length} cloned voice(s)`);
+      await loadClones();
+    } catch (e: unknown) {
+      setCloneError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClonePortabilityBusy(false);
+      if (archiveInputRef.current) archiveInputRef.current.value = "";
+    }
+  }
+
   const hasVoices = voices.length > 0 || clones.length > 0;
   const batchItems = splitBatchInput(text).length;
   const textPlaceholder = ssmlEnabled
@@ -897,6 +949,31 @@ export default function Home() {
               >
                 {cloning ? "Cloning" : "Clone Voice"}
               </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleExportClones}
+                  disabled={clonePortabilityBusy || clones.length === 0}
+                  className="rounded-md border border-gray-700 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-indigo-500 hover:text-indigo-300 disabled:border-gray-800 disabled:text-gray-600"
+                >
+                  Export Voices
+                </button>
+                <button
+                  onClick={() => archiveInputRef.current?.click()}
+                  disabled={clonePortabilityBusy}
+                  className="rounded-md border border-gray-700 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-indigo-500 hover:text-indigo-300 disabled:border-gray-800 disabled:text-gray-600"
+                >
+                  Import Voices
+                </button>
+                <input
+                  ref={archiveInputRef}
+                  id="clone-archive-file"
+                  type="file"
+                  accept=".zip,application/zip,application/x-zip-compressed"
+                  onChange={(e) => void handleImportArchive(e.target.files?.[0] ?? null)}
+                  className="hidden"
+                />
+              </div>
 
               {cloneError && (
                 <div className="rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-300">

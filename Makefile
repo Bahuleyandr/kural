@@ -1,7 +1,10 @@
-.PHONY: backend-test frontend-build frontend-lint frontend-e2e docker-build desktop-build test
+.PHONY: backend-test cli-test frontend-build frontend-lint frontend-e2e docker-build desktop-build desktop-runtime desktop-smoke desktop-release-check test
 
 backend-test:
 	cd backend && python -m pytest
+
+cli-test:
+	cd cli && python -m pip install -e . && python -m pytest
 
 frontend-build:
 	cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm run build
@@ -18,4 +21,19 @@ docker-build:
 desktop-build:
 	cd desktop && ./build.sh
 
-test: backend-test frontend-lint frontend-build
+desktop-runtime:
+	cd desktop && python scripts/provision-backend-runtime.py --target runtime/python
+
+desktop-smoke:
+	cd desktop && python scripts/smoke-release-artifacts.py
+
+desktop-release-check:
+	python -m compileall desktop/scripts
+	KURAL_UPDATER_PUBLIC_KEY=$${KURAL_UPDATER_PUBLIC_KEY:-test-public-key} python desktop/scripts/render-release-config.py --output /tmp/kural-release-test.json
+	mkdir -p /tmp/kural-artifacts
+	printf artifact > /tmp/kural-artifacts/Kural.AppImage
+	printf signature > /tmp/kural-artifacts/Kural.AppImage.sig
+	printf '{"version":"0.2.0"}' > /tmp/kural-artifacts/latest.json
+	python desktop/scripts/smoke-release-artifacts.py --bundle-dir /tmp/kural-artifacts --require-signatures
+
+test: backend-test cli-test frontend-lint frontend-build

@@ -41,6 +41,10 @@ Cargo.lock
 !desktop/src-tauri/Cargo.lock
 **/*.rs.bk
 
+# Desktop release staging
+desktop/runtime/
+desktop/target/tauri-release.conf.json
+
 # General
 .DS_Store
 .idea/

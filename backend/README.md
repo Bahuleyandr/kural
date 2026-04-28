@@ -10,6 +10,8 @@ FastAPI service wrapping Kokoro TTS and Chatterbox TTS.
 - `GET /api/synthesize/stream`: stream Kokoro WAV chunks
 - `POST /api/voices/clone`: clone a voice from a consent-confirmed sample
 - `GET /api/voices/clones`: list saved cloned voices
+- `GET /api/voices/clones/export`: export saved cloned voices
+- `POST /api/voices/clones/import`: import saved cloned voices
 - `DELETE /api/voices/clones/{id}`: delete a saved cloned voice
 
 ## Development

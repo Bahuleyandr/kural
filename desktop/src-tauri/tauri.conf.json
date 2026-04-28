@@ -2,12 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kural",
   "version": "0.2.0",
-  "identifier": "ai.kural.app",
+  "identifier": "ai.kural.tts",
   "build": {
     "frontendDist": "../../frontend/out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "cd ../frontend && pnpm dev",
-    "beforeBuildCommand": "cd ../frontend && pnpm build:desktop"
+    "beforeDevCommand": "cd ../frontend && npx pnpm@9.15.9 dev",
+    "beforeBuildCommand": "cd ../frontend && npx pnpm@9.15.9 build:desktop"
   },
   "app": {
     "security": {

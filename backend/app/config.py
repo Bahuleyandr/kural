@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     clone_min_duration_s: float = 5.0
     clone_max_duration_s: float = 30.0
     clone_max_upload_mb: int = 25
+    clone_archive_max_upload_mb: int = 250
 
 
 settings = Settings()
