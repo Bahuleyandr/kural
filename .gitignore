@@ -37,6 +37,8 @@ yarn-error.log*
 # Rust
 target/
 Cargo.lock
+# Desktop app is a binary — its lock file must be committed for reproducible builds
+!desktop/src-tauri/Cargo.lock
 **/*.rs.bk
 
 # General
