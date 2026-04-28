@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, HTTPException, Query
@@ -9,6 +10,39 @@ from ..tts.engine import synthesize, synthesize_stream
 
 router = APIRouter(tags=["synthesis"])
 _executor = ThreadPoolExecutor(max_workers=2)
+
+
+def _error(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _wav_to_mp3(audio_bytes: bytes) -> bytes:
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-f",
+                "mp3",
+                "-codec:a",
+                "libmp3lame",
+                "pipe:1",
+            ],
+            input=audio_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("MP3 export requires ffmpeg on the backend host.") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"MP3 export failed: {detail}") from exc
+    return result.stdout
 
 
 @router.post("/synthesize")
@@ -31,13 +65,24 @@ async def synthesize_audio(req: SynthesizeRequest) -> Response:
                 _executor,
                 lambda: synthesize(req.text, req.voice, req.speed),
             )
+            if req.format == "mp3":
+                audio_bytes = await loop.run_in_executor(
+                    _executor,
+                    lambda: _wav_to_mp3(audio_bytes),
+                )
             media_type = "audio/mpeg" if req.format == "mp3" else "audio/wav"
             filename = f"kural_speech.{req.format}"
 
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail=_error("tts_unavailable", str(exc)),
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=422,
+            detail=_error("invalid_synthesis_request", str(exc)),
+        ) from exc
 
     return Response(
         content=audio_bytes,

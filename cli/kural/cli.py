@@ -255,8 +255,13 @@ def voices_list(ctx: click.Context, show_clones: bool) -> None:
     required=True,
     help="Display name for this cloned voice.",
 )
+@click.option(
+    "--consent",
+    is_flag=True,
+    help="Confirm you have consent to clone and use this voice.",
+)
 @click.pass_context
-def voices_clone(ctx: click.Context, audio_file: str, name: str) -> None:
+def voices_clone(ctx: click.Context, audio_file: str, name: str, consent: bool) -> None:
     """Clone a voice from an audio sample.
 
     AUDIO_FILE should be a WAV or MP3 file, at least 5 seconds long.
@@ -269,6 +274,8 @@ def voices_clone(ctx: click.Context, audio_file: str, name: str) -> None:
     the web UI. Use the returned ID with `kural speak --voice-id`.
     """
     host = ctx.obj["host"]
+    if not consent:
+        raise click.UsageError("Pass --consent to confirm you may clone this voice.")
 
     with Progress(
         SpinnerColumn(),
@@ -278,7 +285,12 @@ def voices_clone(ctx: click.Context, audio_file: str, name: str) -> None:
     ) as progress:
         progress.add_task(f"Cloning voice from {audio_file}…", total=None)
         try:
-            meta = clone_voice(audio_path=audio_file, name=name, host=host)
+            meta = clone_voice(
+                audio_path=audio_file,
+                name=name,
+                host=host,
+                consent_confirmed=True,
+            )
         except httpx.ConnectError:
             raise click.ClickException(
                 f"Cannot connect to backend at {host}. Is it running?"

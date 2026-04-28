@@ -1,7 +1,12 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .version import APP_VERSION
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env")
+
+    app_version: str = APP_VERSION
     tts_engine: str = "kokoro-onnx"
     sample_rate: int = 24000
     cors_origins: list[str] = [
@@ -18,9 +23,9 @@ class Settings(BaseSettings):
 
     # Chatterbox cloned voice storage
     clone_cache_dir: str = "~/.cache/kural/clones"
-
-    class Config:
-        env_file = ".env"
+    clone_min_duration_s: float = 5.0
+    clone_max_duration_s: float = 30.0
+    clone_max_upload_mb: int = 25
 
 
 settings = Settings()

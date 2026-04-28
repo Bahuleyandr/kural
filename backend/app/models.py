@@ -30,6 +30,8 @@ class ClonedVoiceInfo(BaseModel):
     duration_s: float
     sample_rate: int
     created_at: str
+    consent_confirmed: bool = False
+    watermark: Optional[str] = None
 
 
 class ClonesListResponse(BaseModel):

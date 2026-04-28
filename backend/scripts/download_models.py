@@ -5,7 +5,9 @@ import sys
 import urllib.request
 from pathlib import Path
 
-MODEL_DIR = Path(os.path.expanduser("~/.cache/kural/kokoro"))
+MODEL_DIR = Path(
+    os.path.expanduser(os.environ.get("MODEL_CACHE_DIR", "~/.cache/kural/kokoro"))
+)
 
 # int8 quantized model — 88 MB, fast on CPU, quality on par with full for English TTS
 _BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"

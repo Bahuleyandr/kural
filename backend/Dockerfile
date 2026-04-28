@@ -12,10 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt .
-# CPU-only torch keeps the venv footprint manageable; must precede -r install.
-RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+COPY requirements.txt requirements-clone.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# CPU-only torch keeps the venv footprint manageable; Chatterbox pins 2.6.x.
+RUN pip install --no-cache-dir torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir -r requirements-clone.txt
+RUN pip install --no-cache-dir --no-deps chatterbox-tts==0.1.7
 
 # ── runtime stage ──────────────────────────────────────────────────────────────
 FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 AS runtime
@@ -24,6 +26,7 @@ FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     curl \
+    gosu \
     espeak-ng \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
@@ -39,13 +42,11 @@ COPY --chown=kural:kural . .
 
 RUN chmod +x /app/entrypoint.sh
 
-USER kural
-
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8000/healthz || exit 1
 
-# entrypoint.sh downloads Kokoro model files on first start (idempotent),
-# then execs uvicorn. Models are persisted via the kural_model_cache volume.
+# entrypoint.sh fixes cache-volume ownership, drops to the non-root kural user,
+# downloads Kokoro model files on first start, then execs uvicorn.
 ENTRYPOINT ["/app/entrypoint.sh"]

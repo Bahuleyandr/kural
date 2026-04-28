@@ -3,6 +3,7 @@
 
 use std::{
     net::TcpListener,
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
 };
@@ -33,17 +34,43 @@ fn find_free_port() -> u16 {
 ///
 /// In development: set KURAL_BACKEND_DIR to the `backend/` directory.
 /// In a bundled release: the backend directory is expected next to the executable.
-fn start_backend(port: u16) -> std::io::Result<Child> {
-    let backend_dir = std::env::var("KURAL_BACKEND_DIR").unwrap_or_else(|_| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("backend")))
-            .unwrap_or_else(|| std::path::PathBuf::from("backend"))
-            .to_string_lossy()
-            .into_owned()
+fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Child> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(dir) = std::env::var("KURAL_BACKEND_DIR") {
+        candidates.push(PathBuf::from(dir));
+    }
+    if let Some(dir) = resource_dir {
+        candidates.push(dir.join("backend"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("backend"));
+        }
+    }
+    candidates.push(PathBuf::from("../../backend"));
+    candidates.push(PathBuf::from("../backend"));
+    candidates.push(PathBuf::from("backend"));
+
+    let backend_dir = candidates
+        .into_iter()
+        .find(|path| path.join("app").join("main.py").exists())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Could not find bundled backend/app/main.py. Set KURAL_BACKEND_DIR.",
+            )
+        })?;
+
+    let python = std::env::var("KURAL_PYTHON").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            "python".to_string()
+        } else {
+            "python3".to_string()
+        }
     });
 
-    Command::new("python3")
+    Command::new(python)
         .args([
             "-m",
             "uvicorn",
@@ -57,6 +84,14 @@ fn start_backend(port: u16) -> std::io::Result<Child> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
+}
+
+fn escape_js_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 fn kill_backend(app: &tauri::AppHandle) {
@@ -140,12 +175,13 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let port = find_free_port();
+            let resource_dir = app.path().resource_dir().ok();
 
-            let child_opt = match start_backend(port) {
-                Ok(child) => Some(child),
+            let (child_opt, backend_error) = match start_backend(port, resource_dir) {
+                Ok(child) => (Some(child), None),
                 Err(e) => {
                     eprintln!("kural: backend start failed: {e}");
-                    None
+                    (None, Some(e.to_string()))
                 }
             };
             app.manage(BackendProcess(Mutex::new(child_opt)));
@@ -165,7 +201,11 @@ fn main() {
                 tauri::WebviewUrl::App("index.html".into()),
             )
             .initialization_script(&format!(
-                "window.__KURAL_API_URL__ = 'http://127.0.0.1:{port}';"
+                "window.__KURAL_API_URL__ = 'http://127.0.0.1:{port}'; window.__KURAL_BACKEND_ERROR__ = '{}';",
+                backend_error
+                    .as_deref()
+                    .map(escape_js_string)
+                    .unwrap_or_default()
             ))
             .title("Kural TTS")
             .inner_size(1100.0, 700.0)

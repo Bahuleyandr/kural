@@ -4,17 +4,17 @@ Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline.
 
 ## TTS Engines
 
-- **Kokoro TTS** (Apache 2.0) — high-quality neural TTS with multiple voices
-- **Chatterbox TTS** (MIT) — expressive synthesis with voice cloning support
+- **Kokoro TTS** (Apache 2.0): high-quality neural TTS with multiple voices
+- **Chatterbox TTS** (MIT): expressive synthesis with voice cloning support
 
 ## Project Structure
 
 ```
 kural/
   backend/      # Python FastAPI service wrapping Kokoro and Chatterbox
-  frontend/     # Next.js web UI — text → audio in one page
+  frontend/     # Next.js web UI with batch generation and audio history
   cli/          # Python Click CLI: kural speak, kural voices
-  desktop/      # Tauri cross-platform desktop app (Phase 2)
+  desktop/      # Tauri cross-platform desktop app
   docker-compose.yml
 ```
 
@@ -43,8 +43,9 @@ uvicorn app.main:app --reload
 
 ```bash
 cd frontend
-npm install
-npm run dev
+corepack enable
+pnpm install
+pnpm dev
 ```
 
 **CLI:**
@@ -53,7 +54,7 @@ npm run dev
 cd cli
 pip install -e .
 kural speak "Hello, world!"
-kural voices
+kural voices --clones
 ```
 
 ## API
@@ -62,7 +63,24 @@ kural voices
 |--------|------|-------------|
 | GET | `/api/voices` | List available voices |
 | POST | `/api/synthesize` | Synthesize text to audio |
+| GET | `/api/synthesize/stream` | Stream Kokoro WAV chunks |
+| POST | `/api/voices/clone` | Create a consent-gated cloned voice |
+| GET | `/api/voices/clones` | List cloned voices |
+| DELETE | `/api/voices/clones/{id}` | Delete a cloned voice |
 | GET | `/api/health` | Health check |
+
+Voice clone samples must be WAV/MP3 audio, 5-30 seconds long, no larger than 25 MB, and submitted with explicit consent confirmation.
+
+## Developer commands
+
+```bash
+make backend-test
+make frontend-lint
+make frontend-build
+make docker-build
+```
+
+See `docs/API.md` for API examples and `docs/ROADMAP.md` for the staged product plan.
 
 ## License
 

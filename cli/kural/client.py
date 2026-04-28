@@ -52,6 +52,7 @@ def clone_voice(
     audio_path: str | Path,
     name: str,
     host: str = DEFAULT_HOST,
+    consent_confirmed: bool = False,
 ) -> dict:
     """Upload an audio sample to POST /api/voices/clone and return the clone metadata."""
     audio_path = Path(audio_path)
@@ -60,7 +61,7 @@ def clone_voice(
             resp = client.post(
                 "/api/voices/clone",
                 files={"file": (audio_path.name, fh, "audio/wav")},
-                data={"name": name},
+                data={"name": name, "consent_confirmed": str(consent_confirmed).lower()},
             )
         resp.raise_for_status()
         return resp.json()
