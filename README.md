@@ -36,6 +36,22 @@ Opens the web UI at http://localhost:3000. The backend API runs at http://localh
 
 ### Local development
 
+**One-command local runtime:**
+
+Windows:
+
+```powershell
+.\scripts\start-local.ps1
+```
+
+Linux/macOS:
+
+```bash
+./scripts/start-local.sh
+```
+
+Add `-Setup -ProvisionModels` on Windows, or `--setup --provision-models` on Linux/macOS, to create the optional Python 3.11 local-model runtime and download starter Kokoro, Faster-Whisper, and Argos packs.
+
 **Backend:**
 
 ```bash
