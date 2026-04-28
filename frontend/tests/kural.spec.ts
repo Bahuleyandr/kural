@@ -48,6 +48,20 @@ test("generates audio and records it in the library", async ({ page }) => {
   await expect(page.getByText(/Bella \/ WAV/)).toBeVisible();
 });
 
+test("persists generated audio across reloads", async ({ page }) => {
+  await mockBackend(page);
+  await page.goto("/");
+
+  await page.getByLabel("Text").fill("Saved for later");
+  await page.getByRole("button", { name: "Generate Audio" }).click();
+  await expect(page.getByRole("button", { name: "Saved for later" })).toBeVisible();
+
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: "Saved for later" })).toBeVisible();
+  await expect(page.getByText(/Bella \/ WAV/)).toBeVisible();
+});
+
 test("batch mode sends one request per item", async ({ page }) => {
   await mockBackend(page);
   let calls = 0;
@@ -63,6 +77,23 @@ test("batch mode sends one request per item", async ({ page }) => {
 
   await expect(page.getByRole("button", { name: "Two" })).toBeVisible();
   expect(calls).toBe(2);
+});
+
+test("chunks long text and stores one stitched library item", async ({ page }) => {
+  await mockBackend(page);
+  let calls = 0;
+  await page.route("**/api/synthesize", (route) => {
+    calls += 1;
+    return route.fulfill({ status: 200, contentType: "audio/wav", body: wav });
+  });
+  await page.goto("/");
+
+  const longText = "Sentence ".repeat(500).trim();
+  await page.getByLabel("Text").fill(longText);
+  await page.getByRole("button", { name: "Generate Audio" }).click();
+
+  await expect(page.getByRole("button", { name: longText })).toBeVisible();
+  expect(calls).toBeGreaterThan(1);
 });
 
 test("surfaces clone upload errors", async ({ page }) => {

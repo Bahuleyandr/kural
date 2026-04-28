@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  deleteAudioItem,
+  loadAudioItems,
+  saveAudioItem,
+  type StoredAudioItem,
+} from "./lib/audioLibrary";
+
 function getInjectedValue(key: string): string {
   if (typeof window === "undefined") return "";
   const injected = (window as unknown as Record<string, unknown>)[key];
@@ -51,6 +58,7 @@ interface HistoryItem {
 
 const HISTORY_LIMIT = 12;
 const PRONUNCIATION_KEY = "kural.pronunciation.v1";
+const SYNTH_CHUNK_LIMIT = 3200;
 
 function splitBatchInput(value: string): string[] {
   return value
@@ -76,6 +84,152 @@ function applyPronunciation(text: string, dictionary: string): string {
       if (!from || !to) return current;
       return current.replace(new RegExp(escapeRegExp(from), "gi"), to);
     }, text);
+}
+
+function splitLongText(value: string, limit = SYNTH_CHUNK_LIMIT): string[] {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.length <= limit) return normalized ? [normalized] : [];
+
+  const chunks: string[] = [];
+  let remaining = normalized;
+  const minCut = Math.floor(limit * 0.5);
+
+  while (remaining.length > limit) {
+    const windowText = remaining.slice(0, limit + 1);
+    const sentenceCut = Math.max(
+      windowText.lastIndexOf(". "),
+      windowText.lastIndexOf("! "),
+      windowText.lastIndexOf("? ")
+    );
+    const commaCut = windowText.lastIndexOf(", ");
+    const spaceCut = windowText.lastIndexOf(" ");
+    const cut =
+      sentenceCut >= minCut
+        ? sentenceCut + 1
+        : commaCut >= Math.floor(limit * 0.65)
+          ? commaCut + 1
+          : spaceCut >= minCut
+            ? spaceCut
+            : limit;
+
+    chunks.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+function writeAscii(view: DataView, offset: number, value: string) {
+  for (let i = 0; i < value.length; i += 1) {
+    view.setUint8(offset + i, value.charCodeAt(i));
+  }
+}
+
+function parsePcmWav(buffer: ArrayBuffer) {
+  const view = new DataView(buffer);
+  if (
+    buffer.byteLength < 44 ||
+    String.fromCharCode(...new Uint8Array(buffer.slice(0, 4))) !== "RIFF" ||
+    String.fromCharCode(...new Uint8Array(buffer.slice(8, 12))) !== "WAVE"
+  ) {
+    throw new Error("Unsupported WAV data");
+  }
+
+  let offset = 12;
+  let audioFormat = 0;
+  let channels = 0;
+  let sampleRate = 0;
+  let byteRate = 0;
+  let blockAlign = 0;
+  let bitsPerSample = 0;
+  let dataOffset = 0;
+  let dataSize = 0;
+
+  while (offset + 8 <= buffer.byteLength) {
+    const chunkId = String.fromCharCode(
+      view.getUint8(offset),
+      view.getUint8(offset + 1),
+      view.getUint8(offset + 2),
+      view.getUint8(offset + 3)
+    );
+    const chunkSize = view.getUint32(offset + 4, true);
+    const chunkDataOffset = offset + 8;
+
+    if (chunkId === "fmt ") {
+      audioFormat = view.getUint16(chunkDataOffset, true);
+      channels = view.getUint16(chunkDataOffset + 2, true);
+      sampleRate = view.getUint32(chunkDataOffset + 4, true);
+      byteRate = view.getUint32(chunkDataOffset + 8, true);
+      blockAlign = view.getUint16(chunkDataOffset + 12, true);
+      bitsPerSample = view.getUint16(chunkDataOffset + 14, true);
+    }
+
+    if (chunkId === "data") {
+      dataOffset = chunkDataOffset;
+      dataSize = chunkSize;
+      break;
+    }
+
+    offset = chunkDataOffset + chunkSize + (chunkSize % 2);
+  }
+
+  if (audioFormat !== 1 || !dataOffset) {
+    throw new Error("Only PCM WAV chunks can be stitched");
+  }
+
+  return {
+    audioFormat,
+    channels,
+    sampleRate,
+    byteRate,
+    blockAlign,
+    bitsPerSample,
+    data: new Uint8Array(buffer, dataOffset, dataSize),
+  };
+}
+
+async function stitchWavBlobs(blobs: Blob[]): Promise<Blob> {
+  if (blobs.length === 1) return blobs[0];
+  const wavs = await Promise.all(blobs.map(async (blob) => parsePcmWav(await blob.arrayBuffer())));
+  const first = wavs[0];
+
+  wavs.forEach((wav) => {
+    if (
+      wav.channels !== first.channels ||
+      wav.sampleRate !== first.sampleRate ||
+      wav.bitsPerSample !== first.bitsPerSample ||
+      wav.blockAlign !== first.blockAlign
+    ) {
+      throw new Error("Generated WAV chunks used incompatible audio settings");
+    }
+  });
+
+  const dataSize = wavs.reduce((total, wav) => total + wav.data.byteLength, 0);
+  const output = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(output);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, first.audioFormat, true);
+  view.setUint16(22, first.channels, true);
+  view.setUint32(24, first.sampleRate, true);
+  view.setUint32(28, first.byteRate, true);
+  view.setUint16(32, first.blockAlign, true);
+  view.setUint16(34, first.bitsPerSample, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  const bytes = new Uint8Array(output);
+  let cursor = 44;
+  wavs.forEach((wav) => {
+    bytes.set(wav.data, cursor);
+    cursor += wav.data.byteLength;
+  });
+
+  return new Blob([output], { type: "audio/wav" });
 }
 
 async function readApiError(res: Response): Promise<string> {
@@ -146,6 +300,38 @@ export default function Home() {
     setBackendError(getInjectedValue("__KURAL_BACKEND_ERROR__"));
     const savedPronunciation = window.localStorage.getItem(PRONUNCIATION_KEY);
     if (savedPronunciation) setPronunciation(savedPronunciation);
+
+    let cancelled = false;
+    loadAudioItems(HISTORY_LIMIT)
+      .then((items) => {
+        const loaded = items.map((item) => ({
+          id: item.id,
+          text: item.text,
+          voiceLabel: item.voiceLabel,
+          format: item.format,
+          audioUrl: URL.createObjectURL(item.blob),
+          createdAt: item.createdAt,
+          bytes: item.bytes,
+        }));
+        if (cancelled) {
+          loaded.forEach((item) => URL.revokeObjectURL(item.audioUrl));
+          return;
+        }
+        setHistory((prev) => {
+          if (prev.length > 0) {
+            loaded.forEach((item) => URL.revokeObjectURL(item.audioUrl));
+            return prev;
+          }
+          return loaded;
+        });
+      })
+      .catch(() => {
+        // Persisted history is a convenience; generation works without it.
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -221,7 +407,7 @@ export default function Home() {
     return selectedVoice.kind === "clone" ? `clone:${selectedVoice.id}` : selectedVoice.id;
   }
 
-  function addHistory(item: HistoryItem) {
+  function addHistory(item: HistoryItem, blob: Blob) {
     setHistory((prev) => {
       const next = [item, ...prev].slice(0, HISTORY_LIMIT);
       prev.slice(HISTORY_LIMIT - 1).forEach((oldItem) => {
@@ -231,13 +417,25 @@ export default function Home() {
       });
       return next;
     });
+    const storedItem: StoredAudioItem = {
+      id: item.id,
+      text: item.text,
+      voiceLabel: item.voiceLabel,
+      format: item.format,
+      createdAt: item.createdAt,
+      bytes: item.bytes,
+      blob,
+    };
+    void saveAudioItem(storedItem, HISTORY_LIMIT).catch(() => {
+      // The in-memory library remains usable if persistence is unavailable.
+    });
   }
 
-  async function generateOne(inputText: string, index: number): Promise<HistoryItem> {
-    const processedText = applyPronunciation(inputText.trim(), pronunciation);
+  async function requestSynthesis(processedText: string): Promise<Blob> {
+    const output = selectedVoice?.kind === "clone" ? "wav" : effectiveFormat;
     const body: Record<string, unknown> = {
       text: processedText,
-      format: effectiveFormat,
+      format: output,
     };
     if (selectedVoice?.kind === "clone") {
       body.voice_id = selectedVoice.id;
@@ -253,8 +451,34 @@ export default function Home() {
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(await readApiError(res));
+    return res.blob();
+  }
 
-    const blob = await res.blob();
+  async function generateOne(
+    inputText: string,
+    index: number,
+    totalItems: number
+  ): Promise<HistoryItem> {
+    const processedText = applyPronunciation(inputText.trim(), pronunciation);
+    const chunks = splitLongText(processedText);
+    const blobs: Blob[] = [];
+
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+      if (chunks.length > 1) {
+        setProgressText(
+          totalItems > 1
+            ? `Item ${index + 1}: chunk ${chunkIndex + 1} of ${chunks.length}`
+            : `Generating chunk ${chunkIndex + 1} of ${chunks.length}`
+        );
+      }
+      blobs.push(await requestSynthesis(chunks[chunkIndex]));
+    }
+
+    if (chunks.length > 1) setProgressText("Stitching chunks");
+    const blob =
+      (selectedVoice?.kind === "clone" ? "wav" : effectiveFormat) === "wav"
+        ? await stitchWavBlobs(blobs)
+        : new Blob(blobs, { type: "audio/mpeg" });
     const url = URL.createObjectURL(blob);
     const item = {
       id: `${Date.now()}-${index}`,
@@ -265,7 +489,7 @@ export default function Home() {
       createdAt: new Date().toISOString(),
       bytes: blob.size,
     } satisfies HistoryItem;
-    addHistory(item);
+    addHistory(item, blob);
     return item;
   }
 
@@ -284,7 +508,7 @@ export default function Home() {
         setProgressText(
           inputs.length > 1 ? `Generating ${i + 1} of ${inputs.length}` : ""
         );
-        latest = await generateOne(inputs[i], i);
+        latest = await generateOne(inputs[i], i, inputs.length);
       }
       if (latest) {
         setAudioUrl(latest.audioUrl);
@@ -314,6 +538,9 @@ export default function Home() {
       const item = prev.find((candidate) => candidate.id === id);
       if (item) URL.revokeObjectURL(item.audioUrl);
       return prev.filter((candidate) => candidate.id !== id);
+    });
+    void deleteAudioItem(id).catch(() => {
+      // Best-effort removal from the persisted local library.
     });
     const item = history.find((candidate) => candidate.id === id);
     if (item?.audioUrl === audioUrl) setAudioUrl(null);
