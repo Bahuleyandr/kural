@@ -10,6 +10,7 @@ services:
       - "8000:8000"
     volumes:
       - kural_model_cache:/home/kural/.cache/kural/kokoro
+      - kural_clone_cache:/home/kural/.cache/kural/clones
     environment:
       - TTS_ENGINE=kokoro-onnx
     healthcheck:
@@ -34,3 +35,4 @@ services:
 
 volumes:
   kural_model_cache:
+  kural_clone_cache:

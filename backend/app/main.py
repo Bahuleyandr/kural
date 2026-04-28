@@ -7,7 +7,7 @@ from .routers import clones, health, synthesize, voices
 app = FastAPI(
     title="Kural TTS API",
     description="Privacy-first, offline text-to-speech powered by Kokoro TTS (Apache 2.0) and Chatterbox TTS (MIT).",
-    version="0.2.0",
+    version=settings.app_version,
     docs_url="/docs",
     redoc_url="/redoc",
 )

@@ -15,17 +15,32 @@ _chatterbox_instance = None
 
 
 def _clone_dir() -> Path:
-    d = Path(settings.clone_cache_dir).expanduser()
+    d = Path(settings.clone_cache_dir).expanduser().resolve()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
+def _voice_dir(voice_id: str) -> Path:
+    try:
+        normalized_id = str(uuid.UUID(voice_id))
+    except ValueError as exc:
+        raise ValueError(f"Invalid cloned voice ID: {voice_id}") from exc
+
+    base = _clone_dir()
+    path = (base / normalized_id).resolve()
+    try:
+        path.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"Invalid cloned voice path: {voice_id}") from exc
+    return path
+
+
 def _meta_path(voice_id: str) -> Path:
-    return _clone_dir() / voice_id / "meta.json"
+    return _voice_dir(voice_id) / "meta.json"
 
 
 def _sample_path(voice_id: str) -> Path:
-    return _clone_dir() / voice_id / "sample.wav"
+    return _voice_dir(voice_id) / "sample.wav"
 
 
 def _get_chatterbox():
@@ -61,9 +76,10 @@ def list_cloned_voices() -> list[dict]:
     clones = []
     for meta_file in _clone_dir().glob("*/meta.json"):
         try:
-            with open(meta_file) as f:
+            _voice_dir(meta_file.parent.name)
+            with open(meta_file, encoding="utf-8") as f:
                 clones.append(json.load(f))
-        except Exception:
+        except (OSError, ValueError, json.JSONDecodeError):
             pass
     return sorted(clones, key=lambda v: v.get("created_at", ""))
 
@@ -72,20 +88,28 @@ def get_clone_meta(voice_id: str) -> Optional[dict]:
     path = _meta_path(voice_id)
     if not path.exists():
         return None
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def delete_cloned_voice(voice_id: str) -> bool:
-    voice_dir = _clone_dir() / voice_id
+    voice_dir = _voice_dir(voice_id)
     if not voice_dir.exists():
         return False
     shutil.rmtree(voice_dir)
     return True
 
 
-def save_voice_sample(audio_bytes: bytes, name: str) -> dict:
+def save_voice_sample(
+    audio_bytes: bytes,
+    name: str,
+    consent_confirmed: bool = False,
+) -> dict:
     """Persist a WAV sample and return a new cloned voice record."""
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("Voice name cannot be blank.")
+
     voice_id = str(uuid.uuid4())
     voice_dir = _clone_dir() / voice_id
     voice_dir.mkdir(parents=True)
@@ -101,20 +125,32 @@ def save_voice_sample(audio_bytes: bytes, name: str) -> dict:
         shutil.rmtree(voice_dir)
         raise ValueError(f"Cannot read audio file: {exc}") from exc
 
-    if duration < 5:
+    if duration < settings.clone_min_duration_s:
         shutil.rmtree(voice_dir)
-        raise ValueError(f"Sample too short ({duration:.1f}s); minimum is 5 seconds.")
+        raise ValueError(
+            f"Sample too short ({duration:.1f}s); minimum is "
+            f"{settings.clone_min_duration_s:.0f} seconds."
+        )
+
+    if duration > settings.clone_max_duration_s:
+        shutil.rmtree(voice_dir)
+        raise ValueError(
+            f"Sample too long ({duration:.1f}s); maximum is "
+            f"{settings.clone_max_duration_s:.0f} seconds."
+        )
 
     import datetime
     meta = {
         "id": voice_id,
-        "name": name,
+        "name": clean_name,
         "engine": "chatterbox",
         "duration_s": round(duration, 2),
         "sample_rate": sr,
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
+        "consent_confirmed": consent_confirmed,
+        "watermark": "kural-voice-clone-consent-v1" if consent_confirmed else None,
     }
-    with open(voice_dir / "meta.json", "w") as f:
+    with open(voice_dir / "meta.json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
     return meta

@@ -1,9 +1,9 @@
 [package]
 name = "kural-desktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Kural TTS — privacy-first text-to-speech desktop app"
-license = "Apache-2.0"
+license = "MIT"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kural"
-version = "0.1.0"
-description = "Privacy-first text-to-speech CLI powered by Kokoro"
+version = "0.2.0"
+description = "Privacy-first text-to-speech CLI powered by Kural"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",

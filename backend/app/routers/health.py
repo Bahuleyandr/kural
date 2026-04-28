@@ -4,7 +4,7 @@ from ..config import settings
 
 router = APIRouter()
 
-_HEALTH = HealthResponse(status="ok", version="0.1.0", engine=settings.tts_engine)
+_HEALTH = HealthResponse(status="ok", version=settings.app_version, engine=settings.tts_engine)
 
 
 @router.get("/healthz", response_model=HealthResponse, tags=["system"])
