@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from ..config import settings
 from ..models import TranslationRequest
 
@@ -10,7 +13,15 @@ def _lang_code(value: str) -> str:
     return value.strip().lower().replace("_", "-").split("-")[0]
 
 
+def _configure_argos_dir() -> None:
+    package_dir = settings.argos_packages_dir or settings.argos_package_dir
+    clean = package_dir.strip()
+    if clean:
+        os.environ["ARGOS_PACKAGES_DIR"] = str(Path(clean).expanduser())
+
+
 def _translate_argos(req: TranslationRequest) -> tuple[str, str]:
+    _configure_argos_dir()
     try:
         from argostranslate import translate
     except ImportError as exc:

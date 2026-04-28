@@ -1,10 +1,13 @@
-.PHONY: backend-test backend-local-models cli-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-runtime desktop-smoke desktop-release-check test
+.PHONY: backend-test backend-local-models backend-provision-local-models cli-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-runtime desktop-smoke desktop-release-check test
 
 backend-test:
 	cd backend && python -m pytest
 
 backend-local-models:
 	cd backend && python -m pip install -r requirements-local-models.txt
+
+backend-provision-local-models:
+	cd backend && python scripts/provision_local_models.py
 
 cli-test:
 	cd cli && python -m pip install -e . && python -m pytest

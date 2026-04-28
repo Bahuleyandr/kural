@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 
 from ..config import settings
@@ -27,7 +28,19 @@ def _path_text(path: Path | None) -> str | None:
     return str(path) if path else None
 
 
+def _argos_dir() -> Path | None:
+    return _expand(settings.argos_packages_dir or settings.argos_package_dir)
+
+
+def _configure_argos_dir() -> Path | None:
+    argos_dir = _argos_dir()
+    if argos_dir:
+        os.environ["ARGOS_PACKAGES_DIR"] = str(argos_dir)
+    return argos_dir
+
+
 def _argos_language_pairs() -> list[str]:
+    _configure_argos_dir()
     try:
         from argostranslate import translate
 
@@ -51,7 +64,7 @@ def local_model_inventory() -> list[LocalModelInfo]:
 
     whisper_dir = _expand(settings.faster_whisper_model_dir)
     vosk_dir = _expand(settings.vosk_model_dir)
-    argos_dir = _expand(settings.argos_package_dir)
+    argos_dir = _configure_argos_dir()
     indic_dir = _expand(settings.indictrans2_model_dir)
     nllb_dir = _expand(settings.nllb_model_dir)
 
