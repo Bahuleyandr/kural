@@ -2,10 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
+    thread,
+    time::{Duration, Instant},
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -36,6 +38,7 @@ fn find_free_port() -> u16 {
 /// In a bundled release: the backend directory is expected next to the executable.
 fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Child> {
     let mut candidates: Vec<PathBuf> = Vec::new();
+    let resource_dir_for_python = resource_dir.clone();
 
     if let Ok(dir) = std::env::var("KURAL_BACKEND_DIR") {
         candidates.push(PathBuf::from(dir));
@@ -62,13 +65,61 @@ fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Ch
             )
         })?;
 
-    let python = std::env::var("KURAL_PYTHON").unwrap_or_else(|_| {
-        if cfg!(windows) {
-            "python".to_string()
-        } else {
-            "python3".to_string()
-        }
+    let explicit_python = std::env::var("KURAL_PYTHON").ok();
+    let mut python_candidates: Vec<String> = Vec::new();
+    if let Some(dir) = resource_dir_for_python {
+        python_candidates.push(
+            dir.join("python")
+                .join("Scripts")
+                .join("python.exe")
+                .display()
+                .to_string(),
+        );
+        python_candidates.push(
+            dir.join("python")
+                .join("bin")
+                .join("python")
+                .display()
+                .to_string(),
+        );
+    }
+    python_candidates.push(
+        backend_dir
+            .join(".venv")
+            .join("Scripts")
+            .join("python.exe")
+            .display()
+            .to_string(),
+    );
+    python_candidates.push(
+        backend_dir
+            .join(".venv")
+            .join("bin")
+            .join("python")
+            .display()
+            .to_string(),
+    );
+    python_candidates.push(if cfg!(windows) {
+        "python".to_string()
+    } else {
+        "python3".to_string()
     });
+
+    let python = if let Some(python) = explicit_python {
+        python
+    } else {
+        python_candidates
+            .into_iter()
+            .find(|candidate| {
+                candidate == "python" || candidate == "python3" || PathBuf::from(candidate).exists()
+            })
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Could not find Python runtime. Set KURAL_PYTHON or bundle desktop/runtime/python.",
+                )
+            })?
+    };
 
     Command::new(python)
         .args([
@@ -84,6 +135,28 @@ fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Ch
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
+}
+
+fn wait_for_backend(port: u16, child: &mut Child, timeout: Duration) -> std::io::Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Ok(());
+        }
+        if let Some(status) = child.try_wait()? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Backend exited before startup completed: {status}"),
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Backend did not open its local port within 15 seconds.",
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn escape_js_string(value: &str) -> String {
@@ -178,7 +251,15 @@ fn main() {
             let resource_dir = app.path().resource_dir().ok();
 
             let (child_opt, backend_error) = match start_backend(port, resource_dir) {
-                Ok(child) => (Some(child), None),
+                Ok(mut child) => match wait_for_backend(port, &mut child, Duration::from_secs(15)) {
+                    Ok(()) => (Some(child), None),
+                    Err(e) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        eprintln!("kural: backend health check failed: {e}");
+                        (None, Some(e.to_string()))
+                    }
+                },
                 Err(e) => {
                     eprintln!("kural: backend start failed: {e}");
                     (None, Some(e.to_string()))

@@ -144,3 +144,49 @@ test("surfaces clone upload errors", async ({ page }) => {
 
   await expect(page.getByText(/Sample too short/)).toBeVisible();
 });
+
+test("exports and imports cloned voices", async ({ page }) => {
+  await mockBackend(page);
+  let exportCalls = 0;
+  let importCalls = 0;
+  const clone = {
+    id: "11111111-1111-4111-8111-111111111111",
+    name: "Portable",
+    engine: "chatterbox",
+    duration_s: 5.0,
+    sample_rate: 8000,
+    created_at: "2026-04-28T00:00:00Z",
+    consent_confirmed: true,
+    watermark: "kural-voice-clone-consent-v1",
+  };
+  await page.route("**/api/voices/clones/export", (route) => {
+    exportCalls += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/zip",
+      body: Buffer.from("zip"),
+    });
+  });
+  await page.route("**/api/voices/clones/import", (route) => {
+    importCalls += 1;
+    return route.fulfill({ status: 200, json: { imported: [clone], total: 1 } });
+  });
+  await page.route("**/api/voices/clones", (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({ json: { clones: [clone], total: 1 } });
+    }
+    return route.fulfill({ status: 204, body: "" });
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Export Voices" }).click();
+  await page.locator("#clone-archive-file").setInputFiles({
+    name: "voices.zip",
+    mimeType: "application/zip",
+    buffer: Buffer.from("zip"),
+  });
+
+  await expect(page.getByText(/Imported 1 cloned voice/)).toBeVisible();
+  expect(exportCalls).toBe(1);
+  expect(importCalls).toBe(1);
+});

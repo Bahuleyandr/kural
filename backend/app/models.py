@@ -40,6 +40,11 @@ class ClonesListResponse(BaseModel):
     total: int
 
 
+class ClonesImportResponse(BaseModel):
+    imported: list[ClonedVoiceInfo]
+    total: int
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str

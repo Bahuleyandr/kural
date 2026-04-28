@@ -72,3 +72,25 @@ def delete_clone(voice_id: str, host: str = DEFAULT_HOST) -> None:
     with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
         resp = client.delete(f"/api/voices/clones/{voice_id}")
         resp.raise_for_status()
+
+
+def export_clones(host: str = DEFAULT_HOST, voice_ids: list[str] | None = None) -> bytes:
+    """GET /api/voices/clones/export and return a zip archive."""
+    params = [("voice_id", voice_id) for voice_id in voice_ids or []]
+    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+        resp = client.get("/api/voices/clones/export", params=params)
+        resp.raise_for_status()
+        return resp.content
+
+
+def import_clones(archive_path: str | Path, host: str = DEFAULT_HOST) -> list[dict]:
+    """Upload a Kural voice archive to POST /api/voices/clones/import."""
+    archive_path = Path(archive_path)
+    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+        with open(archive_path, "rb") as fh:
+            resp = client.post(
+                "/api/voices/clones/import",
+                files={"file": (archive_path.name, fh, "application/zip")},
+            )
+        resp.raise_for_status()
+        return resp.json()["imported"]

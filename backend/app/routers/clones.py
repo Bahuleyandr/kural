@@ -2,13 +2,15 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from ..config import settings
-from ..models import ClonedVoiceInfo, ClonesListResponse
+from ..models import ClonedVoiceInfo, ClonesImportResponse, ClonesListResponse
 from ..tts.chatterbox_engine import (
     delete_cloned_voice,
+    export_cloned_voices,
+    import_voice_archive,
     list_cloned_voices,
     save_voice_sample,
 )
@@ -24,6 +26,11 @@ _ACCEPTED_MIME = {
     "audio/mp3",
     "audio/mp4",
     "application/octet-stream",  # some browsers send this for WAV
+}
+_ACCEPTED_ARCHIVE_MIME = {
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",
 }
 
 
@@ -110,6 +117,78 @@ async def list_clones() -> ClonesListResponse:
     return ClonesListResponse(
         clones=[ClonedVoiceInfo(**c) for c in clones],
         total=len(clones),
+    )
+
+
+@router.get("/voices/clones/export")
+async def export_clones(
+    voice_id: list[str] | None = Query(
+        default=None,
+        description="Optional cloned voice IDs to include. Defaults to all clones.",
+    ),
+) -> Response:
+    """Export cloned voices as a portable Kural zip archive."""
+    try:
+        archive_bytes = export_cloned_voices(voice_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_error("invalid_voice_archive_request", str(exc)),
+        ) from exc
+
+    return Response(
+        content=archive_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="kural-voices.zip"'},
+    )
+
+
+@router.post("/voices/clones/import", response_model=ClonesImportResponse)
+async def import_clones(
+    file: UploadFile = File(..., description="Kural voice archive zip"),
+) -> ClonesImportResponse:
+    """Import cloned voices from a Kural zip archive."""
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in _ACCEPTED_ARCHIVE_MIME:
+        raise HTTPException(
+            status_code=415,
+            detail=_error(
+                "unsupported_archive_type",
+                f"Unsupported archive type: {content_type}. Upload a zip file.",
+            ),
+        )
+
+    max_bytes = settings.clone_archive_max_upload_mb * 1024 * 1024
+    archive_bytes = await file.read(max_bytes + 1)
+    if not archive_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail=_error("empty_archive", "Uploaded archive is empty."),
+        )
+    if len(archive_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=_error(
+                "archive_too_large",
+                f"Voice archive must be {settings.clone_archive_max_upload_mb} MB or smaller.",
+            ),
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        imported = await loop.run_in_executor(
+            _executor,
+            lambda: import_voice_archive(archive_bytes),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_error("invalid_voice_archive", str(exc)),
+        ) from exc
+
+    return ClonesImportResponse(
+        imported=[ClonedVoiceInfo(**meta) for meta in imported],
+        total=len(imported),
     )
 
 

@@ -12,6 +12,8 @@ echo "Hello" | kural speak -         # stdin input
 kural voices                         # list available voices
 kural voices --clones                # list Kokoro and cloned voices
 kural voices clone sample.wav --name "My Voice" --consent
+kural voices export voices.zip
+kural voices import voices.zip
 kural speak "Hello" --voice-id <clone-id>
 ```
 

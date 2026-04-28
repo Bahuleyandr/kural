@@ -54,6 +54,19 @@ Delete a clone:
 curl -X DELETE http://localhost:8000/api/voices/clones/<clone-id>
 ```
 
+Export all cloned voices as a portable zip archive:
+
+```bash
+curl http://localhost:8000/api/voices/clones/export --output kural-voices.zip
+```
+
+Import a Kural voice archive:
+
+```bash
+curl -X POST http://localhost:8000/api/voices/clones/import \
+  -F "file=@kural-voices.zip"
+```
+
 Error responses use FastAPI's standard JSON shape with a structured `detail` object:
 
 ```json

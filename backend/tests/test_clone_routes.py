@@ -99,3 +99,41 @@ def test_clone_upload_requires_consent(client):
 
     assert res.status_code == 422
     assert res.json()["detail"]["code"] == "voice_consent_required"
+
+
+def test_clone_export_import_routes(client):
+    created = client.post(
+        "/api/voices/clone",
+        data={"name": "Portable route", "consent_confirmed": "true"},
+        files={"file": ("voice.wav", wav_bytes(), "audio/wav")},
+    ).json()
+
+    export_res = client.get(f"/api/voices/clones/export?voice_id={created['id']}")
+    assert export_res.status_code == 200
+    assert export_res.headers["content-type"] == "application/zip"
+
+    client.delete(f"/api/voices/clones/{created['id']}")
+    import_res = client.post(
+        "/api/voices/clones/import",
+        files={
+            "file": (
+                "voices.zip",
+                export_res.content,
+                "application/zip",
+            )
+        },
+    )
+
+    assert import_res.status_code == 200
+    assert import_res.json()["total"] == 1
+    assert import_res.json()["imported"][0]["name"] == "Portable route"
+
+
+def test_clone_import_rejects_non_zip(client):
+    res = client.post(
+        "/api/voices/clones/import",
+        files={"file": ("voices.zip", b"not a zip", "application/zip")},
+    )
+
+    assert res.status_code == 422
+    assert res.json()["detail"]["code"] == "invalid_voice_archive"

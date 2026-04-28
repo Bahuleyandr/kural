@@ -1,5 +1,7 @@
 import io
+import json
 import uuid
+import zipfile
 
 import numpy as np
 import pytest
@@ -8,6 +10,8 @@ import soundfile as sf
 from app.config import settings
 from app.tts.chatterbox_engine import (
     delete_cloned_voice,
+    export_cloned_voices,
+    import_voice_archive,
     list_cloned_voices,
     save_voice_sample,
     synthesize_cloned,
@@ -62,3 +66,52 @@ def test_rejects_short_and_long_samples():
 
     with pytest.raises(ValueError, match="too long"):
         save_voice_sample(wav_bytes(30.1), "Too long")
+
+
+def test_export_import_clone_archive_roundtrip():
+    meta = save_voice_sample(wav_bytes(5.0), "Portable voice", consent_confirmed=True)
+    archive = export_cloned_voices([meta["id"]])
+
+    assert delete_cloned_voice(meta["id"]) is True
+
+    imported = import_voice_archive(archive)
+
+    assert len(imported) == 1
+    assert imported[0]["id"] == meta["id"]
+    assert imported[0]["name"] == "Portable voice"
+    assert imported[0]["consent_confirmed"] is True
+    assert imported[0]["watermark"] == "kural-voice-clone-consent-v1"
+    assert list_cloned_voices()[0]["id"] == meta["id"]
+
+
+def test_import_clone_archive_dedupes_id_and_name():
+    meta = save_voice_sample(wav_bytes(5.0), "Portable voice", consent_confirmed=True)
+    archive = export_cloned_voices([meta["id"]])
+
+    imported = import_voice_archive(archive)
+
+    assert len(imported) == 1
+    assert imported[0]["id"] != meta["id"]
+    assert imported[0]["name"] == "Portable voice (imported)"
+    assert len(list_cloned_voices()) == 2
+
+
+def test_import_clone_archive_rejects_path_traversal():
+    voice_id = str(uuid.uuid4())
+    manifest = {
+        "schema_version": "kural.voice-archive.v1",
+        "voices": [
+            {
+                "id": voice_id,
+                "name": "Bad path",
+                "sample_path": "../sample.wav",
+            }
+        ],
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("../sample.wav", wav_bytes(5.0))
+
+    with pytest.raises(ValueError, match="Unsafe archive path"):
+        import_voice_archive(buf.getvalue())

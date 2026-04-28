@@ -12,7 +12,9 @@ from .client import (
     DEFAULT_HOST,
     clone_voice,
     delete_clone,
+    export_clones,
     get_voices,
+    import_clones,
     list_clones,
     synthesize,
 )
@@ -333,6 +335,66 @@ def voices_delete(ctx: click.Context, voice_id: str, yes: bool) -> None:
     except httpx.HTTPStatusError as exc:
         raise click.ClickException(f"Backend returned {exc.response.status_code}.")
     err_console.print(f"[green]✓[/green] Deleted {voice_id}")
+
+
+@voices.command("export")
+@click.argument("output_file", type=click.Path(dir_okay=False))
+@click.option(
+    "--voice-id",
+    "voice_ids",
+    multiple=True,
+    help="Clone ID to export. Repeat to export multiple. Defaults to all clones.",
+)
+@click.pass_context
+def voices_export(ctx: click.Context, output_file: str, voice_ids: tuple[str, ...]) -> None:
+    """Export cloned voices to a portable zip archive."""
+    host = ctx.obj["host"]
+    try:
+        archive = export_clones(host=host, voice_ids=list(voice_ids) or None)
+    except httpx.ConnectError:
+        raise click.ClickException(
+            f"Cannot connect to backend at {host}. Is it running?"
+        )
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:200]
+        raise click.ClickException(f"Backend returned {exc.response.status_code}: {detail}")
+
+    with open(output_file, "wb") as fh:
+        fh.write(archive)
+    err_console.print(
+        f"[green]✓[/green] Exported {len(archive):,} bytes → [bold]{output_file}[/bold]"
+    )
+
+
+@voices.command("import")
+@click.argument("archive_file", type=click.Path(exists=True, dir_okay=False))
+@click.pass_context
+def voices_import(ctx: click.Context, archive_file: str) -> None:
+    """Import cloned voices from a Kural zip archive."""
+    host = ctx.obj["host"]
+    try:
+        imported = import_clones(archive_path=archive_file, host=host)
+    except httpx.ConnectError:
+        raise click.ClickException(
+            f"Cannot connect to backend at {host}. Is it running?"
+        )
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:200]
+        raise click.ClickException(f"Backend returned {exc.response.status_code}: {detail}")
+
+    err_console.print(f"[green]✓[/green] Imported {len(imported)} cloned voice(s)")
+    if imported:
+        table = Table(show_lines=False, box=None)
+        table.add_column("ID", style="magenta", no_wrap=True)
+        table.add_column("Name")
+        table.add_column("Duration")
+        for meta in imported:
+            table.add_row(
+                meta.get("id", ""),
+                meta.get("name", ""),
+                f"{meta.get('duration_s', 0):.1f}s",
+            )
+        out_console.print(table)
 
 
 def main() -> None:
