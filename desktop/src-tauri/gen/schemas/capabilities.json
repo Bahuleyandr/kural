@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Kural default capabilities — IPC for backend URL discovery","local":true,"windows":["main"],"permissions":["core:default"]}}
