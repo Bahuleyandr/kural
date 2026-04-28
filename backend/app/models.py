@@ -8,6 +8,7 @@ class SynthesizeRequest(BaseModel):
     voice_id: Optional[str] = Field(default=None, description="Cloned voice ID (overrides `voice` when set)")
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     format: Literal["wav", "mp3"] = Field(default="wav")
+    ssml: bool = Field(default=False, description="Parse text as Kural's supported SSML subset.")
 
 
 class VoiceInfo(BaseModel):

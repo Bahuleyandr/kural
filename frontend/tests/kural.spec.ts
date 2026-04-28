@@ -96,6 +96,28 @@ test("chunks long text and stores one stitched library item", async ({ page }) =
   expect(calls).toBeGreaterThan(1);
 });
 
+test("sends SSML input to the backend without client chunking", async ({ page }) => {
+  await mockBackend(page);
+  const requests: Record<string, unknown>[] = [];
+  await page.route("**/api/synthesize", (route) => {
+    requests.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ status: 200, contentType: "audio/wav", body: wav });
+  });
+  await page.goto("/");
+
+  const ssmlText = 'Hello <break time="250ms"/> world';
+  await page.getByLabel("SSML").check();
+  await page.getByLabel("Text").fill(ssmlText);
+  await page.getByRole("button", { name: "Generate Audio" }).click();
+
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0]).toMatchObject({
+    text: ssmlText,
+    ssml: true,
+    format: "wav",
+  });
+});
+
 test("surfaces clone upload errors", async ({ page }) => {
   await mockBackend(page);
   await page.route("**/api/voices/clone", (route) =>

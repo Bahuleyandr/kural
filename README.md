@@ -12,7 +12,7 @@ Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline.
 ```
 kural/
   backend/      # Python FastAPI service wrapping Kokoro and Chatterbox
-  frontend/     # Next.js web UI with batch generation and audio history
+  frontend/     # Next.js web UI with batch, SSML controls, and audio history
   cli/          # Python Click CLI: kural speak, kural voices
   desktop/      # Tauri cross-platform desktop app
   docker-compose.yml
@@ -62,7 +62,7 @@ kural voices --clones
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/voices` | List available voices |
-| POST | `/api/synthesize` | Synthesize text to audio |
+| POST | `/api/synthesize` | Synthesize text or supported SSML to audio |
 | GET | `/api/synthesize/stream` | Stream Kokoro WAV chunks |
 | POST | `/api/voices/clone` | Create a consent-gated cloned voice |
 | GET | `/api/voices/clones` | List cloned voices |

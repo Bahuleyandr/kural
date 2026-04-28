@@ -26,6 +26,17 @@ curl -X POST http://localhost:8000/api/synthesize \
 
 Use `"format":"mp3"` for Kokoro MP3 export when `ffmpeg` is installed. Cloned voices always return WAV.
 
+Enable Kural's supported SSML subset with `"ssml":true`:
+
+```bash
+curl -X POST http://localhost:8000/api/synthesize \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hello <break time=\"300ms\"/> <sub alias=\"Kural\">குரல்</sub>","voice":"af_bella","format":"wav","ssml":true}' \
+  --output speech.wav
+```
+
+Supported tags are `<speak>`, `<break time="250ms"/>`, `<break strength="medium"/>`, `<sub alias="...">`, `<say-as interpret-as="characters|spell-out|digits|number">`, `<emphasis level="reduced|moderate|strong">`, `<p>`, and `<s>`.
+
 ## Voice Cloning
 
 Voice cloning is consent-gated and local-only. Samples must be WAV/MP3, 5-30 seconds, and at most 25 MB.
