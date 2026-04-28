@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// In the Tauri desktop build, Tauri injects window.__KURAL_API_URL__ via
+// initialization_script before any page JS runs, so the webview always has
+// the correct dynamic backend port without baking a URL into the static build.
+function getApiUrl(): string {
+  if (typeof window !== "undefined") {
+    const injected = (window as unknown as Record<string, unknown>).__KURAL_API_URL__;
+    if (typeof injected === "string" && injected.length > 0) return injected;
+  }
+  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+}
 
 interface VoiceInfo {
   id: string;
@@ -24,7 +33,7 @@ export default function Home() {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/voices`)
+    fetch(`${getApiUrl()}/api/voices`)
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
         return r.json();
@@ -45,7 +54,7 @@ export default function Home() {
     setAudioUrl(null);
 
     try {
-      const res = await fetch(`${API_URL}/api/synthesize`, {
+      const res = await fetch(`${getApiUrl()}/api/synthesize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.trim(), voice, speed, format: "wav" }),

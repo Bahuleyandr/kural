@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/core-plugin-permission/2",
+  "identifier": "default",
+  "description": "Kural default capabilities — IPC for backend URL discovery",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}
