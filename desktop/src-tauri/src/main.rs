@@ -141,13 +141,14 @@ fn main() {
         .setup(|app| {
             let port = find_free_port();
 
-            match start_backend(port) {
-                Ok(child) => app.manage(BackendProcess(Mutex::new(Some(child)))),
+            let child_opt = match start_backend(port) {
+                Ok(child) => Some(child),
                 Err(e) => {
                     eprintln!("kural: backend start failed: {e}");
-                    app.manage(BackendProcess(Mutex::new(None)));
+                    None
                 }
-            }
+            };
+            app.manage(BackendProcess(Mutex::new(child_opt)));
             app.manage(BackendPort(port));
 
             // App menu (macOS menu bar; also used on Linux/Windows)

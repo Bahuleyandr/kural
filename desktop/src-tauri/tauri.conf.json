@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../frontend/out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "cd ../../frontend && pnpm dev",
-    "beforeBuildCommand": "cd ../../frontend && pnpm build:desktop"
+    "beforeDevCommand": "cd ../frontend && pnpm dev",
+    "beforeBuildCommand": "cd ../frontend && pnpm build:desktop"
   },
   "app": {
     "security": {
