@@ -63,6 +63,32 @@ interface ClonedVoiceInfo {
   capabilities?: string[];
 }
 
+interface LocalModelInfo {
+  id: string;
+  name: string;
+  category: "tts" | "asr" | "translation";
+  provider: string;
+  status: "ready" | "not_configured" | "not_installed" | "disabled" | "error";
+  languages?: string[];
+  capabilities?: string[];
+  license?: string | null;
+  path?: string | null;
+  detail?: string | null;
+}
+
+interface TranscriptionSegmentResponse {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+interface TranscriptionResponse {
+  text: string;
+  language?: string | null;
+  provider: string;
+  segments: TranscriptionSegmentResponse[];
+}
+
 type Mode = "single" | "batch";
 type WorkspaceView = "write" | "dubbing" | "pronunciation" | "library";
 type VoiceKind = "kokoro" | "clone";
@@ -211,6 +237,8 @@ export default function Home() {
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
   const [backendError, setBackendError] = useState("");
   const [voicesError, setVoicesError] = useState<string | null>(null);
+  const [localModels, setLocalModels] = useState<LocalModelInfo[]>([]);
+  const [localModelError, setLocalModelError] = useState<string | null>(null);
 
   const [projects, setProjects] = useState<KuralProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState("");
@@ -225,6 +253,8 @@ export default function Home() {
   const [controls, setControls] = useState<AudioControls>(DEFAULT_CONTROLS);
   const [ssmlEnabled, setSsmlEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -364,6 +394,21 @@ export default function Home() {
         await fetchClones();
       } catch {
         if (!cancelled) setClones([]);
+      }
+
+      try {
+        const res = await fetch(`${apiUrl}/api/local-models`);
+        if (!res.ok) throw new Error(await readApiError(res));
+        const data = await res.json();
+        if (!cancelled) {
+          setLocalModels(data.models ?? []);
+          setLocalModelError(null);
+        }
+      } catch (exc) {
+        if (!cancelled) {
+          setLocalModels([]);
+          setLocalModelError(exc instanceof Error ? exc.message : "Could not load local model status");
+        }
       }
     }
 
@@ -651,6 +696,144 @@ export default function Home() {
       setSuccess(`Imported ${imported.length} dubbing segment${imported.length === 1 ? "" : "s"}.`);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not import transcript");
+    }
+  }
+
+  async function transcribeMediaFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !activeProject) return;
+
+    setIsTranscribing(true);
+    setError("");
+    setSuccess("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("language", activeProject.sourceLanguage);
+      const res = await fetch(`${apiUrl}/api/transcribe`, { method: "POST", body: form });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const data = (await res.json()) as TranscriptionResponse;
+      const rawSegments =
+        data.segments.length > 0
+          ? data.segments
+          : data.text.trim()
+            ? [{ start_ms: 0, end_ms: Math.max(1500, data.text.length * 60), text: data.text }]
+            : [];
+      const imported = rawSegments
+        .filter((segment) => segment.text.trim())
+        .map((segment, index) => {
+          const startMs = Math.max(0, segment.start_ms || index * 3000);
+          const endMs =
+            segment.end_ms > startMs
+              ? segment.end_ms
+              : startMs + Math.max(1500, segment.text.trim().length * 60);
+          return {
+            id: createId("dub"),
+            startMs,
+            endMs,
+            sourceText: segment.text.trim(),
+            targetText: segment.text.trim(),
+            sourceLanguage: data.language || activeProject.sourceLanguage,
+            targetLanguage: activeProject.targetLanguage,
+            voiceId: selectedVoiceKey,
+            controls: { ...controls, format: "wav" as const },
+            status: "draft" as const,
+            notes: `ASR: ${data.provider}`,
+          };
+        });
+      if (imported.length === 0) throw new Error("No speech segments found");
+      persistProject({
+        ...activeProject,
+        dubbingSegments: imported,
+        documents: activeProject.documents.map((document) =>
+          document.id === activeProject.activeDocumentId ? { ...document, mode: "dubbing" } : document
+        ),
+      });
+      setActiveView("dubbing");
+      setSuccess(`Transcribed ${imported.length} segment${imported.length === 1 ? "" : "s"} with ${data.provider}.`);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not transcribe media");
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
+  async function requestTranslation(text: string, sourceLanguage: string, targetLanguage: string) {
+    const res = await fetch(`${apiUrl}/api/translate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+      }),
+    });
+    if (!res.ok) throw new Error(await readApiError(res));
+    return (await res.json()) as { text: string; provider: string };
+  }
+
+  async function translateSegment(segment: DubbingSegment) {
+    if (!activeProject || !segment.sourceText.trim()) return;
+    setIsTranslating(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await requestTranslation(
+        segment.sourceText,
+        segment.sourceLanguage || activeProject.sourceLanguage,
+        segment.targetLanguage || activeProject.targetLanguage
+      );
+      updateSegment(segment.id, {
+        targetText: result.text,
+        targetLanguage: activeProject.targetLanguage,
+        error: undefined,
+        notes: segment.notes ? `${segment.notes}; MT: ${result.provider}` : `MT: ${result.provider}`,
+      });
+      setSuccess(`Translated segment with ${result.provider}.`);
+    } catch (exc) {
+      updateSegment(segment.id, {
+        error: exc instanceof Error ? exc.message : "Could not translate segment",
+      });
+      setError(exc instanceof Error ? exc.message : "Could not translate segment");
+    } finally {
+      setIsTranslating(false);
+    }
+  }
+
+  async function translateAllSegments() {
+    if (!activeProject || activeProject.dubbingSegments.length === 0) return;
+    setIsTranslating(true);
+    setError("");
+    setSuccess("");
+    try {
+      const translated: DubbingSegment[] = [];
+      let provider = "local";
+      for (const segment of activeProject.dubbingSegments) {
+        if (!segment.sourceText.trim()) {
+          translated.push(segment);
+          continue;
+        }
+        const result = await requestTranslation(
+          segment.sourceText,
+          segment.sourceLanguage || activeProject.sourceLanguage,
+          activeProject.targetLanguage
+        );
+        provider = result.provider;
+        translated.push({
+          ...segment,
+          targetText: result.text,
+          targetLanguage: activeProject.targetLanguage,
+          error: undefined,
+          notes: segment.notes ? `${segment.notes}; MT: ${result.provider}` : `MT: ${result.provider}`,
+        });
+      }
+      persistProject({ ...activeProject, dubbingSegments: translated });
+      setSuccess(`Translated ${translated.length} segment${translated.length === 1 ? "" : "s"} with ${provider}.`);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not translate segments");
+    } finally {
+      setIsTranslating(false);
     }
   }
 
@@ -1049,13 +1232,27 @@ export default function Home() {
                     Import SRT/VTT/CSV/Text
                     <input className="hidden" type="file" accept=".srt,.vtt,.csv,.txt" onChange={importTranscriptFile} />
                   </label>
+                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm">
+                    Import Audio/Video
+                    <input className="hidden" type="file" accept="audio/*,video/mp4,video/quicktime" onChange={transcribeMediaFile} />
+                  </label>
+                  <button
+                    className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+                    disabled={isTranslating || activeProject.dubbingSegments.length === 0}
+                    onClick={() => void translateAllSegments()}
+                  >
+                    {isTranslating ? "Translating..." : "Translate All"}
+                  </button>
                   <button className="rounded border border-slate-300 px-3 py-2 text-sm" onClick={exportDubbingTimeline}>
                     Export WAV Timeline
                   </button>
                   <span className="text-sm text-slate-500">
-                    {activeProject?.dubbingSegments.length || 0} transcript segments
+                    {isTranscribing
+                      ? "Transcribing..."
+                      : `${activeProject?.dubbingSegments.length || 0} transcript segments`}
                   </span>
                 </div>
+                <LocalModelPanel models={localModels} error={localModelError} />
 
                 <div className="space-y-3">
                   {activeProject?.dubbingSegments.map((segment, index) => {
@@ -1074,13 +1271,22 @@ export default function Home() {
                               Target {formatTime(segment.endMs)} {overrun ? "- overrun" : ""}
                             </p>
                           </div>
-                          <button
-                            className="rounded bg-slate-950 px-3 py-2 text-sm text-white disabled:opacity-50"
-                            disabled={segment.status === "rendering"}
-                            onClick={() => void renderSegment(segment)}
-                          >
-                            {segment.status === "rendering" ? "Rendering..." : "Render Segment"}
-                          </button>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+                              disabled={isTranslating}
+                              onClick={() => void translateSegment(segment)}
+                            >
+                              Translate
+                            </button>
+                            <button
+                              className="rounded bg-slate-950 px-3 py-2 text-sm text-white disabled:opacity-50"
+                              disabled={segment.status === "rendering"}
+                              onClick={() => void renderSegment(segment)}
+                            >
+                              {segment.status === "rendering" ? "Rendering..." : "Render Segment"}
+                            </button>
+                          </div>
                         </div>
                         <div className="grid gap-3 lg:grid-cols-2">
                           <label className="text-sm">
@@ -1270,6 +1476,47 @@ export default function Home() {
         </section>
       </div>
     </main>
+  );
+}
+
+function LocalModelPanel(props: { models: LocalModelInfo[]; error: string | null }) {
+  const workflowModels = props.models.filter((model) => model.category === "asr" || model.category === "translation");
+  const ready = workflowModels.filter((model) => model.status === "ready").length;
+  return (
+    <section className="rounded border border-slate-300 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">Local Models</h2>
+        <span className="text-xs uppercase text-slate-500">
+          {ready}/{workflowModels.length} ready
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {workflowModels.map((model) => (
+          <div key={model.id} className="rounded border border-slate-200 px-3 py-2 text-sm">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-medium">{model.name}</span>
+              <span
+                className={`rounded px-2 py-0.5 text-xs ${
+                  model.status === "ready"
+                    ? "bg-emerald-100 text-emerald-800"
+                    : model.status === "disabled"
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-slate-100 text-slate-700"
+                }`}
+              >
+                {model.status.replace("_", " ")}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              {model.provider} / {model.license || "local"}
+            </p>
+            {model.detail && <p className="mt-1 text-xs text-slate-600">{model.detail}</p>}
+          </div>
+        ))}
+      </div>
+      {props.error && <p className="mt-2 text-sm text-red-700">{props.error}</p>}
+      {workflowModels.length === 0 && <p className="mt-2 text-sm text-slate-500">No local model adapters reported.</p>}
+    </section>
   );
 }
 

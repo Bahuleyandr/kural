@@ -28,5 +28,20 @@ class Settings(BaseSettings):
     clone_max_upload_mb: int = 25
     clone_archive_max_upload_mb: int = 250
 
+    # Optional offline model packs for multilingual dubbing.
+    # Kural never downloads these implicitly; point these at local model folders
+    # after provisioning packs outside the app bundle.
+    local_asr_engine: str = "auto"
+    local_translation_engine: str = "auto"
+    transcribe_max_upload_mb: int = 250
+    faster_whisper_model_dir: str = "~/.cache/kural/asr/faster-whisper"
+    vosk_model_dir: str = "~/.cache/kural/asr/vosk"
+    whisper_cpp_binary: str = ""
+    whisper_cpp_model_file: str = ""
+    argos_package_dir: str = "~/.local/share/argos-translate/packages"
+    indictrans2_model_dir: str = "~/.cache/kural/translation/indictrans2"
+    enable_nllb: bool = False
+    nllb_model_dir: str = "~/.cache/kural/translation/nllb"
+
 
 settings = Settings()

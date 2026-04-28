@@ -1,0 +1,6 @@
+# Optional local multilingual workflow adapters.
+# These are intentionally not installed by default CI/Docker builds because
+# model packs can be large and should be provisioned explicitly by users.
+faster-whisper>=1.2.0
+vosk>=0.3.45
+argostranslate>=1.9.0

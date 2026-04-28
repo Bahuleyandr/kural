@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routers import clones, health, synthesize, voices
+from .routers import clones, health, local_models, synthesize, voices
 
 app = FastAPI(
     title="Kural TTS API",
@@ -24,3 +24,4 @@ app.include_router(health.router)
 app.include_router(voices.router, prefix="/api")
 app.include_router(clones.router, prefix="/api")
 app.include_router(synthesize.router, prefix="/api")
+app.include_router(local_models.router, prefix="/api")

@@ -28,6 +28,31 @@ async function mockBackend(page: import("@playwright/test").Page) {
     }
     return route.fulfill({ status: 204, body: "" });
   });
+  await page.route("**/api/local-models", (route) =>
+    route.fulfill({
+      json: {
+        models: [
+          {
+            id: "faster-whisper",
+            name: "faster-whisper",
+            category: "asr",
+            provider: "faster-whisper",
+            status: "ready",
+            license: "MIT",
+          },
+          {
+            id: "argos-translate",
+            name: "Argos Translate",
+            category: "translation",
+            provider: "argos",
+            status: "ready",
+            license: "MIT / CC0 model packages",
+          },
+        ],
+        total: 2,
+      },
+    })
+  );
   await page.route("**/api/synthesize", (route) =>
     route.fulfill({
       status: 200,
@@ -204,4 +229,56 @@ test("imports subtitle segments into the dubbing workspace", async ({ page }) =>
 
   await expect(page.getByText("Segment 1 - 00:00:01.000")).toBeVisible();
   await expect(page.locator("textarea").first()).toHaveValue("Hello from scene");
+});
+
+test("translates a dubbing segment with the local translation endpoint", async ({ page }) => {
+  await mockBackend(page);
+  await page.route("**/api/translate", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        text: "Hola escena",
+        source_language: "en-US",
+        target_language: "en-US",
+        provider: "argos",
+      },
+    })
+  );
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "dubbing" }).click();
+  await page.locator('input[accept=".srt,.vtt,.csv,.txt"]').setInputFiles({
+    name: "scene.srt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\nHello scene\n"),
+  });
+  await page.getByRole("button", { name: "Translate", exact: true }).click();
+
+  await expect(page.getByLabel("Target text")).toHaveValue("Hola escena");
+});
+
+test("imports audio through the local ASR endpoint", async ({ page }) => {
+  await mockBackend(page);
+  await page.route("**/api/transcribe", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        text: "audio scene",
+        language: "en",
+        provider: "faster-whisper",
+        segments: [{ start_ms: 250, end_ms: 1750, text: "audio scene" }],
+      },
+    })
+  );
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "dubbing" }).click();
+  await page.locator('input[accept="audio/*,video/mp4,video/quicktime"]').setInputFiles({
+    name: "scene.wav",
+    mimeType: "audio/wav",
+    buffer: wav,
+  });
+
+  await expect(page.getByText("Segment 1 - 00:00:00.250")).toBeVisible();
+  await expect(page.getByLabel("Source text")).toHaveValue("audio scene");
 });
