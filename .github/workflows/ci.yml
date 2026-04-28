@@ -40,6 +40,9 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: pnpm lint
+      - name: Unit tests
+        working-directory: frontend
+        run: pnpm test:unit
       - name: Build
         working-directory: frontend
         run: pnpm build

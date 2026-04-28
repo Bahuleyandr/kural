@@ -190,3 +190,18 @@ test("exports and imports cloned voices", async ({ page }) => {
   expect(exportCalls).toBe(1);
   expect(importCalls).toBe(1);
 });
+
+test("imports subtitle segments into the dubbing workspace", async ({ page }) => {
+  await mockBackend(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "dubbing" }).click();
+  await page.locator('input[accept=".srt,.vtt,.csv,.txt"]').setInputFiles({
+    name: "scene.srt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\nHello from scene\n"),
+  });
+
+  await expect(page.getByText("Segment 1 - 00:00:01.000")).toBeVisible();
+  await expect(page.locator("textarea").first()).toHaveValue("Hello from scene");
+});

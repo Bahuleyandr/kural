@@ -42,6 +42,12 @@ def _error(code: str, message: str) -> dict[str, str]:
 async def clone_voice(
     file: UploadFile = File(..., description="WAV or MP3 audio sample (5–30 s)"),
     name: str = Form(..., min_length=1, max_length=100),
+    language: str | None = Form(
+        None,
+        min_length=2,
+        max_length=16,
+        description="Optional BCP-47 language tag for this cloned voice.",
+    ),
     consent_confirmed: bool = Form(
         False,
         description="Must be true to confirm consent to clone this voice.",
@@ -94,7 +100,12 @@ async def clone_voice(
         loop = asyncio.get_event_loop()
         meta = await loop.run_in_executor(
             _executor,
-            lambda: save_voice_sample(audio_bytes, clean_name, consent_confirmed=True),
+            lambda: save_voice_sample(
+                audio_bytes,
+                clean_name,
+                consent_confirmed=True,
+                language=language.strip() if language else None,
+            ),
         )
     except ValueError as exc:
         raise HTTPException(

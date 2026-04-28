@@ -32,12 +32,14 @@ def wav_bytes(duration_s: float = 5.0, sample_rate: int = 8000) -> bytes:
 def test_clone_upload_roundtrip(client):
     res = client.post(
         "/api/voices/clone",
-        data={"name": "Route voice", "consent_confirmed": "true"},
+        data={"name": "Route voice", "language": "en-US", "consent_confirmed": "true"},
         files={"file": ("voice.wav", wav_bytes(), "audio/wav")},
     )
 
     assert res.status_code == 201
     clone_id = res.json()["id"]
+    assert res.json()["language"] == "en-US"
+    assert "voice-clone" in res.json()["capabilities"]
 
     list_res = client.get("/api/voices/clones")
     assert list_res.status_code == 200

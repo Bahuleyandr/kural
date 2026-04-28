@@ -6,6 +6,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
 from ..models import SynthesizeRequest
+from ..tts.audio import process_wav_audio
+from ..tts.pronunciation import apply_pronunciation_rules
 from ..tts.ssml import BreakSegment, TextSegment, parse_ssml, stitch_wav_sequence
 from ..tts.engine import synthesize, synthesize_stream
 
@@ -46,9 +48,26 @@ def _wav_to_mp3(audio_bytes: bytes) -> bytes:
     return result.stdout
 
 
+def _controls(req: SynthesizeRequest):
+    return req.controls
+
+
+def _effective_speed(req: SynthesizeRequest) -> float:
+    return req.controls.speed if req.controls else req.speed
+
+
+def _pause_scale(req: SynthesizeRequest) -> float:
+    return req.controls.pause_scale if req.controls else 1.0
+
+
+def _prepared_text(req: SynthesizeRequest) -> str:
+    return apply_pronunciation_rules(req.text, req.pronunciation_rules, req.language)
+
+
 def _synthesize_ssml(req: SynthesizeRequest) -> bytes:
-    segments = parse_ssml(req.text)
+    segments = parse_ssml(req.text, req.pronunciation_rules, req.language)
     parts: list[bytes | BreakSegment] = []
+    speed = _effective_speed(req)
 
     if req.voice_id:
         from ..tts.chatterbox_engine import synthesize_cloned
@@ -58,14 +77,14 @@ def _synthesize_ssml(req: SynthesizeRequest) -> bytes:
                 parts.append(synthesize_cloned(segment.text, req.voice_id))
             else:
                 parts.append(segment)
-        return stitch_wav_sequence(parts)
+        return stitch_wav_sequence(parts, pause_scale=_pause_scale(req))
 
     for segment in segments:
         if isinstance(segment, TextSegment):
-            parts.append(synthesize(segment.text, req.voice, req.speed))
+            parts.append(synthesize(segment.text, req.voice, speed))
         else:
             parts.append(segment)
-    return stitch_wav_sequence(parts)
+    return stitch_wav_sequence(parts, pause_scale=_pause_scale(req))
 
 
 @router.post("/synthesize")
@@ -80,7 +99,11 @@ async def synthesize_audio(req: SynthesizeRequest) -> Response:
                 _executor,
                 lambda: _synthesize_ssml(req)
                 if req.ssml
-                else synthesize_cloned(req.text, req.voice_id),
+                else synthesize_cloned(_prepared_text(req), req.voice_id),
+            )
+            audio_bytes = await loop.run_in_executor(
+                _executor,
+                lambda: process_wav_audio(audio_bytes, _controls(req)),
             )
             media_type = "audio/wav"
             filename = "kural_speech.wav"
@@ -90,7 +113,11 @@ async def synthesize_audio(req: SynthesizeRequest) -> Response:
                 _executor,
                 lambda: _synthesize_ssml(req)
                 if req.ssml
-                else synthesize(req.text, req.voice, req.speed),
+                else synthesize(_prepared_text(req), req.voice, _effective_speed(req)),
+            )
+            audio_bytes = await loop.run_in_executor(
+                _executor,
+                lambda: process_wav_audio(audio_bytes, _controls(req)),
             )
             if req.format == "mp3":
                 audio_bytes = await loop.run_in_executor(

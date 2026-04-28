@@ -19,11 +19,15 @@
 ## Creator Product
 
 - Batch generation from blank-line separated text.
-- Pronunciation replacement dictionary.
-- Local session audio library with replay and downloads.
-- Persistent audio library via IndexedDB.
+- Project workspaces with local documents, audio assets, pronunciation profiles, and voice presets.
+- Named pronunciation profiles with ordered literal and whole-word rules.
+- Persistent project audio library via IndexedDB with migration from the original audio history.
 - True long-document chunk stitching.
-- SSML subset for pauses, emphasis, and pronunciation.
+- Expanded SSML subset for pauses, emphasis, prosody fallback, phoneme fallback, and pronunciation.
+- Advanced controls for speed, pitch, volume, normalization, silence trimming, pause scaling, and format.
+- Transcript-file dubbing workflow for SRT, VTT, CSV, and plain text.
+- `.kuralproj` import/export archives for local project portability.
+- Multilingual-ready voice and clone metadata with language, locale, engine, and capabilities.
 - Voice-clone import/export archives for local portability.
 - WAV/MP3 export for Kokoro and WAV export for cloned voices.
 - Voice sample preview and clone consent guardrails.
@@ -36,5 +40,8 @@
 
 ## Next Candidates
 
+- Local ASR adapter for audio/video-to-transcript dubbing.
+- Local translation adapter for target-language script drafts.
+- User-provided multilingual model packs and voice folders.
 - User-defined voice folders.
 - Published signed desktop installers after signing keys and distribution accounts are available.

@@ -193,6 +193,7 @@ def save_voice_sample(
     audio_bytes: bytes,
     name: str,
     consent_confirmed: bool = False,
+    language: str | None = None,
 ) -> dict:
     """Persist a WAV sample and return a new cloned voice record."""
     clean_name = name.strip()
@@ -210,6 +211,9 @@ def save_voice_sample(
         "created_at": _utc_now(),
         "consent_confirmed": consent_confirmed,
         "watermark": _CONSENT_WATERMARK if consent_confirmed else None,
+        "language": language,
+        "locale": language,
+        "capabilities": ["voice-clone", "wav", "advanced-controls"],
     }
     return _write_clone_record(meta, audio_bytes)
 
@@ -245,6 +249,9 @@ def export_cloned_voices(voice_ids: Iterable[str] | None = None) -> bytes:
                 "created_at": meta.get("created_at"),
                 "consent_confirmed": bool(meta.get("consent_confirmed", False)),
                 "watermark": meta.get("watermark"),
+                "language": meta.get("language"),
+                "locale": meta.get("locale") or meta.get("language"),
+                "capabilities": meta.get("capabilities", ["voice-clone", "wav"]),
                 "sample_path": sample_path,
             }
             manifest_voices.append(exported_meta)
@@ -353,6 +360,11 @@ def import_voice_archive(archive_bytes: bytes) -> list[dict]:
                     "created_at": created_at,
                     "consent_confirmed": consent_confirmed,
                     "watermark": watermark,
+                    "language": raw_meta.get("language") if isinstance(raw_meta.get("language"), str) else None,
+                    "locale": raw_meta.get("locale") if isinstance(raw_meta.get("locale"), str) else None,
+                    "capabilities": raw_meta.get("capabilities")
+                    if isinstance(raw_meta.get("capabilities"), list)
+                    else ["voice-clone", "wav", "advanced-controls"],
                 }
                 imported.append(_write_clone_record(meta, sample_bytes))
                 written_ids.append(imported_id)
