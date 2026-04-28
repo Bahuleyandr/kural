@@ -33,11 +33,41 @@ Argos packages for English with Hindi, Bengali, and Spanish in both directions.
 
 ## Run Backend With Packs
 
+The easiest path is the local runtime launcher.
+
+Windows:
+
+```powershell
+.\scripts\start-local.ps1
+```
+
+Linux/macOS:
+
+```bash
+./scripts/start-local.sh
+```
+
+First-time setup can be done through the launcher:
+
+```powershell
+.\scripts\start-local.ps1 -Setup -ProvisionModels
+```
+
+```bash
+./scripts/start-local.sh --setup --provision-models
+```
+
+Use `-InstallCloneRuntime` or `--install-clone-runtime` with setup when you
+want the local Python venv to include the optional Chatterbox cloning runtime.
+Docker images already include that runtime.
+
+You can also run the backend manually:
+
 ```powershell
 $env:FASTER_WHISPER_MODEL_DIR = 'D:\Dev\Tools\kural-models\asr\faster-whisper-tiny'
 $env:ARGOS_PACKAGES_DIR = 'D:\Dev\Tools\kural-models\translation\argos\packages'
-$env:MODEL_CACHE_DIR = "$env:USERPROFILE\.cache\kural\kokoro"
-$env:CLONE_CACHE_DIR = "$env:USERPROFILE\.cache\kural\clones"
+$env:MODEL_CACHE_DIR = 'D:\Dev\Tools\kural-models\tts\kokoro'
+$env:CLONE_CACHE_DIR = 'D:\Dev\Tools\kural-models\clones'
 & 'D:\Dev\Tools\kural-local-models\.venv\Scripts\python.exe' `
   -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -50,3 +80,14 @@ curl http://localhost:8000/api/local-models
 
 `faster-whisper` and `argos` should report `ready`. Kural does not download
 large models on app startup.
+
+## Platform Compatibility
+
+- Windows: use `scripts/start-local.ps1`. The default tools root is
+  `D:\Dev\Tools` when that folder exists, otherwise `%USERPROFILE%\.kural\tools`.
+- Linux/macOS: use `scripts/start-local.sh`. The default tools root is
+  `$HOME/.local/share/kural-tools`.
+- Docker: `docker compose up` remains the most reproducible path and includes
+  the Chatterbox clone runtime.
+- Desktop: the Tauri app is cross-platform, but signed installers and bundled
+  local model packs still need platform-specific release work.
