@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     kokoro_model_file: str = "kokoro-v1.0.int8.onnx"
     kokoro_voices_file: str = "voices-v1.0.bin"
 
+    # Chatterbox cloned voice storage
+    clone_cache_dir: str = "~/.cache/kural/clones"
+
     class Config:
         env_file = ".env"
 

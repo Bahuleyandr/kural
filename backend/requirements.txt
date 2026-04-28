@@ -5,5 +5,10 @@ pydantic-settings>=2.5.0,<3.0
 soundfile>=0.12.1
 numpy>=2.0.2
 scipy>=1.13.0
+python-multipart>=0.0.9
 # Lightweight kokoro TTS via ONNX runtime (no PyTorch dependency)
 kokoro-onnx>=0.4.7
+# Chatterbox TTS for voice cloning (MIT license, requires PyTorch)
+chatterbox-tts>=0.1.1
+torch>=2.0.0
+torchaudio>=2.0.0

@@ -15,17 +15,30 @@ _executor = ThreadPoolExecutor(max_workers=2)
 async def synthesize_audio(req: SynthesizeRequest) -> Response:
     try:
         loop = asyncio.get_event_loop()
-        audio_bytes = await loop.run_in_executor(
-            _executor,
-            lambda: synthesize(req.text, req.voice, req.speed),
-        )
+
+        if req.voice_id:
+            # Cloned-voice path via Chatterbox
+            from ..tts.chatterbox_engine import synthesize_cloned
+            audio_bytes = await loop.run_in_executor(
+                _executor,
+                lambda: synthesize_cloned(req.text, req.voice_id),
+            )
+            media_type = "audio/wav"
+            filename = "kural_speech.wav"
+        else:
+            # Standard Kokoro path
+            audio_bytes = await loop.run_in_executor(
+                _executor,
+                lambda: synthesize(req.text, req.voice, req.speed),
+            )
+            media_type = "audio/mpeg" if req.format == "mp3" else "audio/wav"
+            filename = f"kural_speech.{req.format}"
+
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    media_type = "audio/mpeg" if req.format == "mp3" else "audio/wav"
-    filename = f"kural_speech.{req.format}"
     return Response(
         content=audio_bytes,
         media_type=media_type,
