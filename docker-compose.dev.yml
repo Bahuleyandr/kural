@@ -1,0 +1,6 @@
+# Development overlay — adds live-reload bind mount for the backend.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  backend:
+    volumes:
+      - ./backend:/app
