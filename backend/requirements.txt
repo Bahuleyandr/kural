@@ -1,0 +1,9 @@
+fastapi>=0.115.0,<1.0
+uvicorn[standard]>=0.32.0,<1.0
+pydantic>=2.9.0,<3.0
+pydantic-settings>=2.5.0,<3.0
+soundfile>=0.12.1
+numpy>=2.0.2
+scipy>=1.13.0
+# Lightweight kokoro TTS via ONNX runtime (no PyTorch dependency)
+kokoro-onnx>=0.4.7
