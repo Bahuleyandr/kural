@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
 from ..models import SynthesizeRequest
+from ..tts.ssml import BreakSegment, TextSegment, parse_ssml, stitch_wav_sequence
 from ..tts.engine import synthesize, synthesize_stream
 
 router = APIRouter(tags=["synthesis"])
@@ -45,6 +46,28 @@ def _wav_to_mp3(audio_bytes: bytes) -> bytes:
     return result.stdout
 
 
+def _synthesize_ssml(req: SynthesizeRequest) -> bytes:
+    segments = parse_ssml(req.text)
+    parts: list[bytes | BreakSegment] = []
+
+    if req.voice_id:
+        from ..tts.chatterbox_engine import synthesize_cloned
+
+        for segment in segments:
+            if isinstance(segment, TextSegment):
+                parts.append(synthesize_cloned(segment.text, req.voice_id))
+            else:
+                parts.append(segment)
+        return stitch_wav_sequence(parts)
+
+    for segment in segments:
+        if isinstance(segment, TextSegment):
+            parts.append(synthesize(segment.text, req.voice, req.speed))
+        else:
+            parts.append(segment)
+    return stitch_wav_sequence(parts)
+
+
 @router.post("/synthesize")
 async def synthesize_audio(req: SynthesizeRequest) -> Response:
     try:
@@ -55,7 +78,9 @@ async def synthesize_audio(req: SynthesizeRequest) -> Response:
             from ..tts.chatterbox_engine import synthesize_cloned
             audio_bytes = await loop.run_in_executor(
                 _executor,
-                lambda: synthesize_cloned(req.text, req.voice_id),
+                lambda: _synthesize_ssml(req)
+                if req.ssml
+                else synthesize_cloned(req.text, req.voice_id),
             )
             media_type = "audio/wav"
             filename = "kural_speech.wav"
@@ -63,7 +88,9 @@ async def synthesize_audio(req: SynthesizeRequest) -> Response:
             # Standard Kokoro path
             audio_bytes = await loop.run_in_executor(
                 _executor,
-                lambda: synthesize(req.text, req.voice, req.speed),
+                lambda: _synthesize_ssml(req)
+                if req.ssml
+                else synthesize(req.text, req.voice, req.speed),
             )
             if req.format == "mp3":
                 audio_bytes = await loop.run_in_executor(

@@ -21,13 +21,13 @@
 - Batch generation from blank-line separated text.
 - Pronunciation replacement dictionary.
 - Local session audio library with replay and downloads.
+- Persistent audio library via IndexedDB.
+- True long-document chunk stitching.
+- SSML subset for pauses, emphasis, and pronunciation.
 - WAV/MP3 export for Kokoro and WAV export for cloned voices.
 - Voice sample preview and clone consent guardrails.
 
 ## Next Candidates
 
-- Persistent audio library via IndexedDB.
-- True long-document chunk stitching.
 - User-defined voice folders and import/export.
-- SSML subset for pauses, emphasis, and pronunciation.
 - Signed desktop installers and auto-update channel.

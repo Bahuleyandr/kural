@@ -256,6 +256,7 @@ export default function Home() {
   const [selectedVoice, setSelectedVoice] = useState<SelectedVoice | null>(null);
   const [speed, setSpeed] = useState(1.0);
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("wav");
+  const [ssmlEnabled, setSsmlEnabled] = useState(false);
   const [pronunciation, setPronunciation] = useState("");
   const [loading, setLoading] = useState(false);
   const [progressText, setProgressText] = useState("");
@@ -437,6 +438,7 @@ export default function Home() {
       text: processedText,
       format: output,
     };
+    if (ssmlEnabled) body.ssml = true;
     if (selectedVoice?.kind === "clone") {
       body.voice_id = selectedVoice.id;
       body.format = "wav";
@@ -459,8 +461,11 @@ export default function Home() {
     index: number,
     totalItems: number
   ): Promise<HistoryItem> {
-    const processedText = applyPronunciation(inputText.trim(), pronunciation);
-    const chunks = splitLongText(processedText);
+    const trimmedText = inputText.trim();
+    const processedText = ssmlEnabled
+      ? trimmedText
+      : applyPronunciation(trimmedText, pronunciation);
+    const chunks = ssmlEnabled ? [processedText] : splitLongText(processedText);
     const blobs: Blob[] = [];
 
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
@@ -591,6 +596,11 @@ export default function Home() {
 
   const hasVoices = voices.length > 0 || clones.length > 0;
   const batchItems = splitBatchInput(text).length;
+  const textPlaceholder = ssmlEnabled
+    ? 'Hello <break time="300ms"/> world.'
+    : mode === "batch"
+      ? "Separate each item with a blank line."
+      : "Enter text to synthesize.";
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 py-8 px-4">
@@ -632,20 +642,27 @@ export default function Home() {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300" htmlFor="text">
-                Text
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-sm font-medium text-gray-300" htmlFor="text">
+                  Text
+                </label>
+                <label className="inline-flex items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 py-1.5 text-xs font-medium text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={ssmlEnabled}
+                    onChange={(e) => setSsmlEnabled(e.target.checked)}
+                    className="accent-indigo-500"
+                  />
+                  <span>SSML</span>
+                </label>
+              </div>
               <textarea
                 id="text"
                 rows={mode === "batch" ? 10 : 7}
                 maxLength={10000}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder={
-                  mode === "batch"
-                    ? "Separate each item with a blank line."
-                    : "Enter text to synthesize."
-                }
+                placeholder={textPlaceholder}
                 className="w-full resize-y rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <div className="flex justify-between text-xs text-gray-600">
@@ -740,8 +757,11 @@ export default function Home() {
                 rows={3}
                 value={pronunciation}
                 onChange={(e) => setPronunciation(e.target.value)}
-                placeholder="Kural=koo-ral"
-                className="w-full resize-y rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                disabled={ssmlEnabled}
+                placeholder={
+                  ssmlEnabled ? '<sub alias="koo-ral">Kural</sub>' : "Kural=koo-ral"
+                }
+                className="w-full resize-y rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40"
               />
             </div>
 
