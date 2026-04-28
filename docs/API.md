@@ -15,6 +15,14 @@ curl http://localhost:8000/api/voices
 curl http://localhost:8000/api/voices/clones
 ```
 
+## Local Models
+
+```bash
+curl http://localhost:8000/api/local-models
+```
+
+Kural reports optional local ASR and translation adapters without downloading model packs. `ready` means the Python package or external binary is installed and the configured local model folder has files. `not_installed` or `not_configured` means the UI can show the workflow but the backend will return a structured `503` until the pack is provisioned.
+
 ## Synthesis
 
 ```bash
@@ -81,6 +89,26 @@ curl -X POST http://localhost:8000/api/voices/clone \
 ```
 
 Clone and built-in voice metadata include `language`, optional `locale`, `engine`, and `capabilities` so the UI can filter voices and prepare for future local multilingual model packs.
+
+## Local Translation And Transcription
+
+Translation is offline-only and uses installed local packages. Argos Translate is the first implemented provider; IndicTrans2 and NLLB are registered as model-pack targets but are not enabled by default.
+
+```bash
+curl -X POST http://localhost:8000/api/translate \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hello","source_language":"en-US","target_language":"es-ES"}'
+```
+
+Transcription accepts local audio/video uploads and uses the first configured ASR provider in this order: faster-whisper, Vosk, then whisper.cpp.
+
+```bash
+curl -X POST http://localhost:8000/api/transcribe \
+  -F "language=en-US" \
+  -F "file=@scene.wav"
+```
+
+Optional adapter dependencies live in `backend/requirements-local-models.txt`. Kural does not include or download ASR/translation model weights in the default package.
 
 ## Local Project Archives
 

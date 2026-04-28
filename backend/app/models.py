@@ -2,6 +2,28 @@ from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
 
+LocalModelCategory = Literal["tts", "asr", "translation"]
+LocalModelStatus = Literal["ready", "not_configured", "not_installed", "disabled", "error"]
+
+
+class LocalModelInfo(BaseModel):
+    id: str
+    name: str
+    category: LocalModelCategory
+    provider: str
+    status: LocalModelStatus
+    languages: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    license: Optional[str] = None
+    path: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class LocalModelsResponse(BaseModel):
+    models: list[LocalModelInfo]
+    total: int
+
+
 class AudioControls(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     pitch_semitones: float = Field(default=0.0, ge=-6.0, le=6.0)
@@ -32,6 +54,33 @@ class SynthesizeRequest(BaseModel):
     controls: Optional[AudioControls] = None
     pronunciation_rules: list[PronunciationRule] = Field(default_factory=list)
     language: Optional[str] = Field(default=None, max_length=16)
+
+
+class TranslationRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=20000)
+    source_language: str = Field(..., min_length=2, max_length=16)
+    target_language: str = Field(..., min_length=2, max_length=16)
+    provider: Literal["auto", "argos", "indictrans2", "nllb"] = "auto"
+
+
+class TranslationResponse(BaseModel):
+    text: str
+    source_language: str
+    target_language: str
+    provider: str
+
+
+class TranscriptionSegment(BaseModel):
+    start_ms: int = Field(..., ge=0)
+    end_ms: int = Field(..., ge=0)
+    text: str
+
+
+class TranscriptionResponse(BaseModel):
+    text: str
+    language: Optional[str] = None
+    provider: str
+    segments: list[TranscriptionSegment] = Field(default_factory=list)
 
 
 class VoiceInfo(BaseModel):

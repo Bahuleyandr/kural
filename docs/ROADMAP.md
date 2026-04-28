@@ -26,6 +26,8 @@
 - Expanded SSML subset for pauses, emphasis, prosody fallback, phoneme fallback, and pronunciation.
 - Advanced controls for speed, pitch, volume, normalization, silence trimming, pause scaling, and format.
 - Transcript-file dubbing workflow for SRT, VTT, CSV, and plain text.
+- Optional local ASR adapters for faster-whisper, Vosk, and whisper.cpp.
+- Optional Argos Translate adapter for target-language drafts.
 - `.kuralproj` import/export archives for local project portability.
 - Multilingual-ready voice and clone metadata with language, locale, engine, and capabilities.
 - Voice-clone import/export archives for local portability.
@@ -40,8 +42,8 @@
 
 ## Next Candidates
 
-- Local ASR adapter for audio/video-to-transcript dubbing.
-- Local translation adapter for target-language script drafts.
-- User-provided multilingual model packs and voice folders.
+- Full IndicTrans2 inference adapter after a local model-pack layout is selected.
+- Optional local forced alignment for subtitle timing repair.
+- User-provided multilingual TTS voice folders.
 - User-defined voice folders.
 - Published signed desktop installers after signing keys and distribution accounts are available.

@@ -7,6 +7,12 @@ Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline.
 - **Kokoro TTS** (Apache 2.0): high-quality neural TTS with multiple voices
 - **Chatterbox TTS** (MIT): expressive synthesis with voice cloning support
 
+## Optional Local Multilingual Packs
+
+- **ASR:** faster-whisper, Vosk, or whisper.cpp for offline audio/video transcription
+- **Translation:** Argos Translate for offline translation packages
+- **Model-pack slots:** IndicTrans2 for Indian-language translation and NLLB for non-commercial experiments remain explicit opt-ins
+
 ## Project Structure
 
 ```
@@ -69,11 +75,16 @@ kural voices --clones
 | GET | `/api/voices/clones/export` | Export cloned voices as a zip archive |
 | POST | `/api/voices/clones/import` | Import cloned voices from a zip archive |
 | DELETE | `/api/voices/clones/{id}` | Delete a cloned voice |
+| GET | `/api/local-models` | Inspect optional local ASR/translation adapters |
+| POST | `/api/transcribe` | Transcribe local audio/video into dubbing segments |
+| POST | `/api/translate` | Translate local script text with installed packages |
 | GET | `/api/health` | Health check |
 
 Voice clone samples must be WAV/MP3 audio, 5-30 seconds long, no larger than 25 MB, and submitted with explicit consent confirmation.
 
 The creator UI stores projects locally in IndexedDB. A project can contain script documents, generated audio assets, voice presets, pronunciation profiles, and transcript-file dubbing segments. Use `.kuralproj` export/import when you want a portable offline archive.
+
+Optional ASR/translation runtimes are adapter-driven. Install `backend/requirements-local-models.txt`, provision model packs under the configured cache folders, then check `/api/local-models` before using audio/video import or local translation in the dubbing workspace.
 
 ## Developer commands
 
