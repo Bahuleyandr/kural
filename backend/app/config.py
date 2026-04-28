@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     whisper_cpp_binary: str = ""
     whisper_cpp_model_file: str = ""
     argos_package_dir: str = "~/.local/share/argos-translate/packages"
+    argos_packages_dir: str = "~/.local/share/argos-translate/packages"
     indictrans2_model_dir: str = "~/.cache/kural/translation/indictrans2"
     enable_nllb: bool = False
     nllb_model_dir: str = "~/.cache/kural/translation/nllb"
