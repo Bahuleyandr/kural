@@ -39,6 +39,25 @@ def test_parse_ssml_supports_breaks_substitutions_and_say_as():
     ]
 
 
+def test_parse_ssml_supports_prosody_phoneme_and_pronunciation_rules():
+    segments = parse_ssml(
+        '<speak><prosody rate="slow" pitch="+1st">Kural</prosody> '
+        '<phoneme alphabet="ipa" ph="a i">AI</phoneme></speak>',
+        pronunciation_rules=[
+            {
+                "id": "rule-1",
+                "pattern": "Kural",
+                "replacement": "koo-ral",
+                "mode": "word",
+                "enabled": True,
+                "priority": 1,
+            }
+        ],
+    )
+
+    assert segments == [TextSegment("koo-ral AI")]
+
+
 def test_parse_ssml_accepts_namespaced_speak_documents():
     segments = parse_ssml(
         '<speak xmlns="http://www.w3.org/2001/10/synthesis">'
@@ -60,6 +79,15 @@ def test_stitch_wav_sequence_inserts_silence_between_chunks():
     )
 
     assert wav_frame_count(stitched) == 10 + 800 + 5
+
+
+def test_stitch_wav_sequence_scales_ssml_pauses():
+    stitched = stitch_wav_sequence(
+        [wav_bytes(frames=10), BreakSegment(100), wav_bytes(frames=5)],
+        pause_scale=2.0,
+    )
+
+    assert wav_frame_count(stitched) == 10 + 1600 + 5
 
 
 def test_synthesize_ssml_stitches_backend_segments(monkeypatch):

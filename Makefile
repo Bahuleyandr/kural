@@ -1,4 +1,4 @@
-.PHONY: backend-test cli-test frontend-build frontend-lint frontend-e2e docker-build desktop-build desktop-runtime desktop-smoke desktop-release-check test
+.PHONY: backend-test cli-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-runtime desktop-smoke desktop-release-check test
 
 backend-test:
 	cd backend && python -m pytest
@@ -11,6 +11,9 @@ frontend-build:
 
 frontend-lint:
 	cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm run lint
+
+frontend-unit:
+	cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm run test:unit
 
 frontend-e2e:
 	cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm exec playwright install chromium && pnpm run test:e2e
@@ -36,4 +39,4 @@ desktop-release-check:
 	printf '{"version":"0.2.0"}' > /tmp/kural-artifacts/latest.json
 	python desktop/scripts/smoke-release-artifacts.py --bundle-dir /tmp/kural-artifacts --require-signatures
 
-test: backend-test cli-test frontend-lint frontend-build
+test: backend-test cli-test frontend-lint frontend-unit frontend-build

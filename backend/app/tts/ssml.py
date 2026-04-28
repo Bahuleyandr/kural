@@ -4,10 +4,11 @@ import io
 import re
 import wave
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable, Sequence
 from xml.etree import ElementTree
 
 from ..config import settings
+from .pronunciation import apply_pronunciation_rules
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,17 @@ class BreakSegment:
 SpeechSegment = TextSegment | BreakSegment
 WaveParams = tuple[int, int, int, int, str, str]
 
-_ALLOWED_TAGS = {"speak", "break", "sub", "say-as", "emphasis", "p", "s"}
+_ALLOWED_TAGS = {
+    "speak",
+    "break",
+    "sub",
+    "say-as",
+    "emphasis",
+    "prosody",
+    "phoneme",
+    "p",
+    "s",
+}
 _BREAK_STRENGTHS_MS = {
     "none": 0,
     "x-weak": 125,
@@ -45,10 +56,16 @@ def _tag_name(node: ElementTree.Element) -> str:
     return node.tag.rsplit("}", 1)[-1] if isinstance(node.tag, str) else ""
 
 
-def _add_text(segments: list[SpeechSegment], value: str) -> None:
+def _add_text(
+    segments: list[SpeechSegment],
+    value: str,
+    pronunciation_rules: Sequence[Any] | None = None,
+    language: str | None = None,
+) -> None:
     text = _normalize_text(value)
     if not text:
         return
+    text = apply_pronunciation_rules(text, pronunciation_rules, language)
     if segments and isinstance(segments[-1], TextSegment):
         segments[-1] = TextSegment(f"{segments[-1].text} {text}")
     else:
@@ -84,9 +101,18 @@ def _say_as_text(node: ElementTree.Element) -> str:
     interpret_as = node.attrib.get("interpret-as", "").lower()
     if interpret_as in {"characters", "spell-out"}:
         return " ".join(ch for ch in text if not ch.isspace())
-    if interpret_as == "digits":
+    if interpret_as in {"digits", "telephone"}:
         return " ".join(ch for ch in text if ch.isdigit())
-    if interpret_as in {"number", ""}:
+    if interpret_as in {
+        "number",
+        "cardinal",
+        "ordinal",
+        "date",
+        "time",
+        "currency",
+        "unit",
+        "",
+    }:
         return text
     raise ValueError("SSML say-as interpret-as value is not supported.")
 
@@ -103,13 +129,50 @@ def _emphasis_text(node: ElementTree.Element) -> str:
     return text
 
 
-def _walk(node: ElementTree.Element, segments: list[SpeechSegment]) -> None:
+def _validate_prosody(node: ElementTree.Element) -> None:
+    allowed = {"rate", "pitch", "volume"}
+    unknown = set(node.attrib) - allowed
+    if unknown:
+        raise ValueError("SSML prosody only supports rate, pitch, and volume attributes.")
+
+    rate = node.attrib.get("rate", "medium").lower()
+    if rate not in {"x-slow", "slow", "medium", "fast", "x-fast", "default"}:
+        if not re.match(r"^\d{1,3}%$", rate):
+            raise ValueError("SSML prosody rate is not supported.")
+
+    pitch = node.attrib.get("pitch", "medium").lower()
+    if pitch not in {"x-low", "low", "medium", "high", "x-high", "default"}:
+        if not re.match(r"^[+-]?\d+(?:\.\d+)?(?:st|%)$", pitch):
+            raise ValueError("SSML prosody pitch is not supported.")
+
+    volume = node.attrib.get("volume", "medium").lower()
+    if volume not in {"silent", "x-soft", "soft", "medium", "loud", "x-loud", "default"}:
+        if not re.match(r"^[+-]?\d+(?:\.\d+)?db$", volume):
+            raise ValueError("SSML prosody volume is not supported.")
+
+
+def _phoneme_text(node: ElementTree.Element) -> str:
+    alphabet = node.attrib.get("alphabet", "ipa").lower()
+    if alphabet not in {"ipa", "x-sampa"}:
+        raise ValueError("SSML phoneme alphabet is not supported.")
+    return _inner_text(node) or _normalize_text(node.attrib.get("ph", ""))
+
+
+def _walk(
+    node: ElementTree.Element,
+    segments: list[SpeechSegment],
+    pronunciation_rules: Sequence[Any] | None = None,
+    language: str | None = None,
+) -> None:
     node_tag = _tag_name(node)
     if node_tag not in _ALLOWED_TAGS:
         raise ValueError(f"SSML tag <{node_tag}> is not supported.")
 
-    if node_tag in {"speak", "p", "s"} and node.text:
-        _add_text(segments, node.text)
+    if node_tag == "prosody":
+        _validate_prosody(node)
+
+    if node_tag in {"speak", "p", "s", "prosody"} and node.text:
+        _add_text(segments, node.text, pronunciation_rules, language)
 
     for child in node:
         child_tag = _tag_name(child)
@@ -119,16 +182,23 @@ def _walk(node: ElementTree.Element, segments: list[SpeechSegment]) -> None:
         if child_tag == "break":
             segments.append(BreakSegment(_parse_break_ms(child)))
         elif child_tag == "sub":
-            _add_text(segments, child.attrib.get("alias") or _inner_text(child))
+            _add_text(
+                segments,
+                child.attrib.get("alias") or _inner_text(child),
+                pronunciation_rules,
+                language,
+            )
         elif child_tag == "say-as":
-            _add_text(segments, _say_as_text(child))
+            _add_text(segments, _say_as_text(child), pronunciation_rules, language)
         elif child_tag == "emphasis":
-            _add_text(segments, _emphasis_text(child))
+            _add_text(segments, _emphasis_text(child), pronunciation_rules, language)
+        elif child_tag == "phoneme":
+            _add_text(segments, _phoneme_text(child), pronunciation_rules, language)
         else:
-            _walk(child, segments)
+            _walk(child, segments, pronunciation_rules, language)
 
         if child.tail:
-            _add_text(segments, child.tail)
+            _add_text(segments, child.tail, pronunciation_rules, language)
 
     if node_tag == "p":
         segments.append(BreakSegment(650))
@@ -170,7 +240,11 @@ def _split_text(value: str, limit: int = _TEXT_SPLIT_LIMIT) -> list[str]:
     return chunks
 
 
-def parse_ssml(value: str) -> list[SpeechSegment]:
+def parse_ssml(
+    value: str,
+    pronunciation_rules: Sequence[Any] | None = None,
+    language: str | None = None,
+) -> list[SpeechSegment]:
     source = value.strip()
     if not source:
         raise ValueError("SSML text cannot be blank.")
@@ -185,7 +259,7 @@ def parse_ssml(value: str) -> list[SpeechSegment]:
         raise ValueError("SSML input must use <speak> as the root element.")
 
     segments: list[SpeechSegment] = []
-    _walk(root, segments)
+    _walk(root, segments, pronunciation_rules, language)
 
     expanded: list[SpeechSegment] = []
     for segment in segments:
@@ -199,7 +273,7 @@ def parse_ssml(value: str) -> list[SpeechSegment]:
     return expanded
 
 
-def stitch_wav_sequence(parts: Iterable[bytes | BreakSegment]) -> bytes:
+def stitch_wav_sequence(parts: Iterable[bytes | BreakSegment], pause_scale: float = 1.0) -> bytes:
     params: WaveParams | None = None
     frames: list[bytes] = []
     pending_break_ms = 0
@@ -211,10 +285,11 @@ def stitch_wav_sequence(parts: Iterable[bytes | BreakSegment]) -> bytes:
 
     for part in parts:
         if isinstance(part, BreakSegment):
+            milliseconds = int(part.milliseconds * pause_scale)
             if params is None:
-                pending_break_ms += part.milliseconds
+                pending_break_ms += milliseconds
                 continue
-            frames.append(silence(part.milliseconds, params))
+            frames.append(silence(milliseconds, params))
             continue
 
         with wave.open(io.BytesIO(part), "rb") as reader:

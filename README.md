@@ -12,7 +12,7 @@ Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline.
 ```
 kural/
   backend/      # Python FastAPI service wrapping Kokoro and Chatterbox
-  frontend/     # Next.js web UI with batch, SSML controls, voice portability, and audio history
+  frontend/     # Next.js creator workspace with projects, dubbing, SSML, and audio library
   cli/          # Python Click CLI: kural speak, kural voices
   desktop/      # Tauri cross-platform desktop app
   docker-compose.yml
@@ -73,11 +73,14 @@ kural voices --clones
 
 Voice clone samples must be WAV/MP3 audio, 5-30 seconds long, no larger than 25 MB, and submitted with explicit consent confirmation.
 
+The creator UI stores projects locally in IndexedDB. A project can contain script documents, generated audio assets, voice presets, pronunciation profiles, and transcript-file dubbing segments. Use `.kuralproj` export/import when you want a portable offline archive.
+
 ## Developer commands
 
 ```bash
 make backend-test
 make frontend-lint
+make frontend-unit
 make frontend-build
 make docker-build
 ```
