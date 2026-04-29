@@ -2,7 +2,31 @@
 
 import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { AudioLibrary } from "./components/AudioLibrary";
+import { ClonePanel } from "./components/ClonePanel";
+import { ControlPanel } from "./components/ControlPanel";
+import { LocalModelPanel } from "./components/LocalModelPanel";
+import { apiFetch, getApiUrl, readApiError } from "./lib/api";
+import {
+  SYNTH_CHUNK_LIMIT,
+  applyPronunciationPreview,
+  downloadBlob,
+  measureBlobDuration,
+  parseVoiceKey,
+  splitBatchInput,
+  splitLongText,
+  toApiControls,
+  toApiRules,
+} from "./lib/clientUtils";
 import { formatTime, parseTranscript } from "./lib/dubbing";
+import type {
+  ClonedVoiceInfo,
+  LocalModelInfo,
+  Mode,
+  TranscriptionResponse,
+  VoiceInfo,
+  WorkspaceView,
+} from "./lib/types";
 import { stitchWavBlobs } from "./lib/wav";
 import {
   DEFAULT_CONTROLS,
@@ -26,209 +50,6 @@ import {
   type PronunciationRule,
   type VoicePreset,
 } from "./lib/workspace";
-
-function getInjectedValue(key: string): string {
-  if (typeof window === "undefined") return "";
-  const injected = (window as unknown as Record<string, unknown>)[key];
-  return typeof injected === "string" ? injected : "";
-}
-
-function getApiUrl(): string {
-  const injected = getInjectedValue("__KURAL_API_URL__");
-  return injected || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-}
-
-interface VoiceInfo {
-  id: string;
-  name: string;
-  language: string;
-  gender: string;
-  description: string;
-  locale?: string | null;
-  engine?: string;
-  capabilities?: string[];
-}
-
-interface ClonedVoiceInfo {
-  id: string;
-  name: string;
-  engine: string;
-  duration_s: number;
-  sample_rate: number;
-  created_at: string;
-  consent_confirmed?: boolean;
-  watermark?: string | null;
-  language?: string | null;
-  locale?: string | null;
-  capabilities?: string[];
-}
-
-interface LocalModelInfo {
-  id: string;
-  name: string;
-  category: "tts" | "asr" | "translation";
-  provider: string;
-  status: "ready" | "not_configured" | "not_installed" | "disabled" | "error";
-  languages?: string[];
-  capabilities?: string[];
-  license?: string | null;
-  path?: string | null;
-  detail?: string | null;
-}
-
-interface TranscriptionSegmentResponse {
-  start_ms: number;
-  end_ms: number;
-  text: string;
-}
-
-interface TranscriptionResponse {
-  text: string;
-  language?: string | null;
-  provider: string;
-  segments: TranscriptionSegmentResponse[];
-}
-
-type Mode = "single" | "batch";
-type WorkspaceView = "write" | "dubbing" | "pronunciation" | "library";
-type VoiceKind = "kokoro" | "clone";
-
-const SYNTH_CHUNK_LIMIT = 3200;
-
-function splitBatchInput(value: string): string[] {
-  return value
-    .split(/\n\s*\n/g)
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function splitLongText(value: string, limit = SYNTH_CHUNK_LIMIT): string[] {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized || normalized.length <= limit) return normalized ? [normalized] : [];
-
-  const chunks: string[] = [];
-  let remaining = normalized;
-  const minCut = Math.floor(limit * 0.5);
-
-  while (remaining.length > limit) {
-    const windowText = remaining.slice(0, limit + 1);
-    const sentenceCut = Math.max(
-      windowText.lastIndexOf(". "),
-      windowText.lastIndexOf("! "),
-      windowText.lastIndexOf("? ")
-    );
-    const commaCut = windowText.lastIndexOf(", ");
-    const spaceCut = windowText.lastIndexOf(" ");
-    const cut =
-      sentenceCut >= minCut
-        ? sentenceCut + 1
-        : commaCut >= Math.floor(limit * 0.65)
-          ? commaCut + 1
-          : spaceCut >= minCut
-            ? spaceCut
-            : limit;
-
-    chunks.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trim();
-  }
-
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function applyPronunciationPreview(text: string, rules: PronunciationRule[], language: string): string {
-  return [...rules]
-    .filter((rule) => rule.enabled && rule.pattern.trim() && rule.replacement.trim())
-    .sort((a, b) => b.priority - a.priority)
-    .reduce((current, rule) => {
-      if (rule.language && language && rule.language.toLowerCase() !== language.toLowerCase()) {
-        return current;
-      }
-      const flags = rule.caseSensitive ? "g" : "gi";
-      const pattern =
-        rule.mode === "word"
-          ? new RegExp(`(?<!\\w)${escapeRegExp(rule.pattern)}(?!\\w)`, flags)
-          : new RegExp(escapeRegExp(rule.pattern), flags);
-      return current.replace(pattern, rule.replacement);
-    }, text);
-}
-
-async function readApiError(res: Response): Promise<string> {
-  const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    const data = await res.json();
-    const detail = data?.detail;
-    if (detail?.message) return `${res.status}: ${detail.message}`;
-    if (typeof detail === "string") return `${res.status}: ${detail}`;
-    return `${res.status}: ${JSON.stringify(data)}`;
-  }
-  return `${res.status}: ${await res.text()}`;
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function parseVoiceKey(key: string): { kind: VoiceKind; id: string } {
-  const [kind, ...rest] = key.split(":");
-  return {
-    kind: kind === "clone" ? "clone" : "kokoro",
-    id: rest.join(":") || key,
-  };
-}
-
-function toApiControls(controls: AudioControls) {
-  return {
-    speed: controls.speed,
-    pitch_semitones: controls.pitchSemitones,
-    volume_db: controls.volumeDb,
-    normalize: controls.normalize,
-    trim_silence: controls.trimSilence,
-    pause_scale: controls.pauseScale,
-  };
-}
-
-function toApiRules(rules: PronunciationRule[]) {
-  return rules.map((rule) => ({
-    id: rule.id,
-    pattern: rule.pattern,
-    replacement: rule.replacement,
-    mode: rule.mode,
-    case_sensitive: rule.caseSensitive,
-    language: rule.language || undefined,
-    enabled: rule.enabled,
-    priority: rule.priority,
-  }));
-}
-
-function measureBlobDuration(blob: Blob): Promise<number> {
-  return new Promise((resolve) => {
-    const audio = new Audio();
-    const url = URL.createObjectURL(blob);
-    audio.preload = "metadata";
-    audio.onloadedmetadata = () => {
-      const duration = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : 0;
-      URL.revokeObjectURL(url);
-      resolve(duration);
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(0);
-    };
-    audio.src = url;
-  });
-}
 
 export default function Home() {
   const apiUrl = useMemo(getApiUrl, []);
@@ -308,7 +129,10 @@ export default function Home() {
       id: clone.id,
     }));
     return [...kokoro, ...cloned].filter(
-      (option) => languageFilter === "all" || option.language === languageFilter || option.language === "custom"
+      (option) =>
+        languageFilter === "all" ||
+        option.language === languageFilter ||
+        option.language === "custom"
     );
   }, [clones, languageFilter, voices]);
 
@@ -355,7 +179,7 @@ export default function Home() {
   }, []);
 
   const fetchClones = useCallback(async () => {
-    const res = await fetch(`${apiUrl}/api/voices/clones`);
+    const res = await apiFetch(`${apiUrl}/api/voices/clones`);
     if (!res.ok) throw new Error(await readApiError(res));
     const data = await res.json();
     setClones(data.clones ?? []);
@@ -366,55 +190,62 @@ export default function Home() {
   }, [refreshWorkspace]);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     async function loadBackend() {
       try {
-        const health = await fetch(`${apiUrl}/api/health`);
+        const health = await apiFetch(`${apiUrl}/api/health`, { signal });
         if (health.ok) {
           const data = await health.json();
-          if (!cancelled) setBackendStatus(`${data.engine} ${data.version}`);
+          if (!signal.aborted) setBackendStatus(`${data.engine} ${data.version}`);
         }
-      } catch {
-        if (!cancelled) setBackendError("Backend is not reachable yet.");
+      } catch (exc) {
+        if (!signal.aborted && !(exc instanceof DOMException && exc.name === "AbortError")) {
+          setBackendError("Backend is not reachable yet.");
+        }
       }
 
       try {
-        const res = await fetch(`${apiUrl}/api/voices`);
+        const res = await apiFetch(`${apiUrl}/api/voices`, { signal });
         if (!res.ok) throw new Error(await readApiError(res));
         const data = await res.json();
-        if (!cancelled) {
+        if (!signal.aborted) {
           setVoices(data.voices ?? []);
           setVoicesError(null);
         }
       } catch (exc) {
-        if (!cancelled) setVoicesError(exc instanceof Error ? exc.message : "Could not load voices");
+        if (!signal.aborted && !(exc instanceof DOMException && exc.name === "AbortError")) {
+          setVoicesError(exc instanceof Error ? exc.message : "Could not load voices");
+        }
       }
 
       try {
         await fetchClones();
       } catch {
-        if (!cancelled) setClones([]);
+        if (!signal.aborted) setClones([]);
       }
 
       try {
-        const res = await fetch(`${apiUrl}/api/local-models`);
+        const res = await apiFetch(`${apiUrl}/api/local-models`, { signal });
         if (!res.ok) throw new Error(await readApiError(res));
         const data = await res.json();
-        if (!cancelled) {
+        if (!signal.aborted) {
           setLocalModels(data.models ?? []);
           setLocalModelError(null);
         }
       } catch (exc) {
-        if (!cancelled) {
+        if (!signal.aborted && !(exc instanceof DOMException && exc.name === "AbortError")) {
           setLocalModels([]);
-          setLocalModelError(exc instanceof Error ? exc.message : "Could not load local model status");
+          setLocalModelError(
+            exc instanceof Error ? exc.message : "Could not load local model status"
+          );
         }
       }
     }
 
     void loadBackend();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [apiUrl, fetchClones]);
 
@@ -454,7 +285,9 @@ export default function Home() {
   function persistProject(project: KuralProject) {
     const next = { ...project, updatedAt: new Date().toISOString() };
     setProjects((current) =>
-      current.map((candidate) => (candidate.id === next.id ? next : candidate)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      current
+        .map((candidate) => (candidate.id === next.id ? next : candidate))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     );
     void saveProject(next).catch((exc) => {
       setWorkspaceError(exc instanceof Error ? exc.message : "Could not save project");
@@ -466,7 +299,9 @@ export default function Home() {
     persistProject({
       ...activeProject,
       documents: activeProject.documents.map((document) =>
-        document.id === activeDocument.id ? { ...document, text: value, updatedAt: new Date().toISOString() } : document
+        document.id === activeDocument.id
+          ? { ...document, text: value, updatedAt: new Date().toISOString() }
+          : document
       ),
     });
   }
@@ -476,7 +311,9 @@ export default function Home() {
     persistProject({
       ...activeProject,
       documents: activeProject.documents.map((document) =>
-        document.id === activeDocument.id ? { ...document, mode, updatedAt: new Date().toISOString() } : document
+        document.id === activeDocument.id
+          ? { ...document, mode, updatedAt: new Date().toISOString() }
+          : document
       ),
     });
   }
@@ -513,7 +350,10 @@ export default function Home() {
     await refreshAssets(projectId);
   }
 
-  async function synthesizeText(text: string, segment?: DubbingSegment): Promise<{ blob: Blob; format: OutputFormat }> {
+  async function synthesizeText(
+    text: string,
+    segment?: DubbingSegment
+  ): Promise<{ blob: Blob; format: OutputFormat }> {
     if (!activeProject || !activeProfile) throw new Error("Workspace is still loading");
     const voiceKey = segment?.voiceId || selectedVoiceKey;
     if (!voiceKey) throw new Error("Choose a voice before generating audio");
@@ -531,7 +371,7 @@ export default function Home() {
       language: activeProject.targetLanguage,
     };
 
-    const res = await fetch(`${apiUrl}/api/synthesize`, {
+    const res = await apiFetch(`${apiUrl}/api/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -604,7 +444,9 @@ export default function Home() {
     persistProject({
       ...activeProject,
       pronunciationProfiles: activeProject.pronunciationProfiles.map((candidate) =>
-        candidate.id === profile.id ? { ...profile, updatedAt: new Date().toISOString() } : candidate
+        candidate.id === profile.id
+          ? { ...profile, updatedAt: new Date().toISOString() }
+          : candidate
       ),
     });
   }
@@ -635,7 +477,9 @@ export default function Home() {
     if (!activeProfile) return;
     updatePronunciationProfile({
       ...activeProfile,
-      rules: activeProfile.rules.map((rule) => (rule.id === ruleId ? { ...rule, ...fields } : rule)),
+      rules: activeProfile.rules.map((rule) =>
+        rule.id === ruleId ? { ...rule, ...fields } : rule
+      ),
     });
   }
 
@@ -689,11 +533,15 @@ export default function Home() {
         ...activeProject,
         dubbingSegments: imported,
         documents: activeProject.documents.map((document) =>
-          document.id === activeProject.activeDocumentId ? { ...document, mode: "dubbing" } : document
+          document.id === activeProject.activeDocumentId
+            ? { ...document, mode: "dubbing" }
+            : document
         ),
       });
       setActiveView("dubbing");
-      setSuccess(`Imported ${imported.length} dubbing segment${imported.length === 1 ? "" : "s"}.`);
+      setSuccess(
+        `Imported ${imported.length} dubbing segment${imported.length === 1 ? "" : "s"}.`
+      );
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not import transcript");
     }
@@ -711,7 +559,7 @@ export default function Home() {
       const form = new FormData();
       form.append("file", file);
       form.append("language", activeProject.sourceLanguage);
-      const res = await fetch(`${apiUrl}/api/transcribe`, { method: "POST", body: form });
+      const res = await apiFetch(`${apiUrl}/api/transcribe`, { method: "POST", body: form });
       if (!res.ok) throw new Error(await readApiError(res));
       const data = (await res.json()) as TranscriptionResponse;
       const rawSegments =
@@ -747,11 +595,15 @@ export default function Home() {
         ...activeProject,
         dubbingSegments: imported,
         documents: activeProject.documents.map((document) =>
-          document.id === activeProject.activeDocumentId ? { ...document, mode: "dubbing" } : document
+          document.id === activeProject.activeDocumentId
+            ? { ...document, mode: "dubbing" }
+            : document
         ),
       });
       setActiveView("dubbing");
-      setSuccess(`Transcribed ${imported.length} segment${imported.length === 1 ? "" : "s"} with ${data.provider}.`);
+      setSuccess(
+        `Transcribed ${imported.length} segment${imported.length === 1 ? "" : "s"} with ${data.provider}.`
+      );
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not transcribe media");
     } finally {
@@ -760,7 +612,7 @@ export default function Home() {
   }
 
   async function requestTranslation(text: string, sourceLanguage: string, targetLanguage: string) {
-    const res = await fetch(`${apiUrl}/api/translate`, {
+    const res = await apiFetch(`${apiUrl}/api/translate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -788,7 +640,9 @@ export default function Home() {
         targetText: result.text,
         targetLanguage: activeProject.targetLanguage,
         error: undefined,
-        notes: segment.notes ? `${segment.notes}; MT: ${result.provider}` : `MT: ${result.provider}`,
+        notes: segment.notes
+          ? `${segment.notes}; MT: ${result.provider}`
+          : `MT: ${result.provider}`,
       });
       setSuccess(`Translated segment with ${result.provider}.`);
     } catch (exc) {
@@ -825,11 +679,15 @@ export default function Home() {
           targetText: result.text,
           targetLanguage: activeProject.targetLanguage,
           error: undefined,
-          notes: segment.notes ? `${segment.notes}; MT: ${result.provider}` : `MT: ${result.provider}`,
+          notes: segment.notes
+            ? `${segment.notes}; MT: ${result.provider}`
+            : `MT: ${result.provider}`,
         });
       }
       persistProject({ ...activeProject, dubbingSegments: translated });
-      setSuccess(`Translated ${translated.length} segment${translated.length === 1 ? "" : "s"} with ${provider}.`);
+      setSuccess(
+        `Translated ${translated.length} segment${translated.length === 1 ? "" : "s"} with ${provider}.`
+      );
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not translate segments");
     } finally {
@@ -941,7 +799,7 @@ export default function Home() {
       form.append("name", cloneName);
       form.append("language", cloneLanguage);
       form.append("consent_confirmed", String(cloneConsent));
-      const res = await fetch(`${apiUrl}/api/voices/clone`, { method: "POST", body: form });
+      const res = await apiFetch(`${apiUrl}/api/voices/clone`, { method: "POST", body: form });
       if (!res.ok) throw new Error(await readApiError(res));
       await fetchClones();
       setCloneName("");
@@ -956,14 +814,14 @@ export default function Home() {
   }
 
   async function deleteClone(voiceId: string) {
-    const res = await fetch(`${apiUrl}/api/voices/clones/${voiceId}`, { method: "DELETE" });
+    const res = await apiFetch(`${apiUrl}/api/voices/clones/${voiceId}`, { method: "DELETE" });
     if (res.ok) {
       await fetchClones();
     }
   }
 
   async function exportClones() {
-    const res = await fetch(`${apiUrl}/api/voices/clones/export`);
+    const res = await apiFetch(`${apiUrl}/api/voices/clones/export`);
     if (!res.ok) {
       setCloneMessage(await readApiError(res));
       return;
@@ -977,7 +835,10 @@ export default function Home() {
     if (!file) return;
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${apiUrl}/api/voices/clones/import`, { method: "POST", body: form });
+    const res = await apiFetch(`${apiUrl}/api/voices/clones/import`, {
+      method: "POST",
+      body: form,
+    });
     if (!res.ok) {
       setCloneMessage(await readApiError(res));
       return;
@@ -989,28 +850,48 @@ export default function Home() {
 
   const mode: Mode = activeDocument?.mode === "batch" ? "batch" : "single";
   const previewText = activeProfile
-    ? applyPronunciationPreview(activeProfile.previewText, activeProfile.rules, activeProject?.targetLanguage || "")
+    ? applyPronunciationPreview(
+        activeProfile.previewText,
+        activeProfile.rules,
+        activeProject?.targetLanguage || ""
+      )
     : "";
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
+      <a
+        href="#workspace"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:shadow"
+      >
+        Skip to workspace
+      </a>
       <div className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-4 lg:flex-row">
-        <aside className="w-full shrink-0 rounded border border-slate-300 bg-white p-3 lg:w-72">
+        <aside
+          className="w-full shrink-0 rounded border border-slate-300 bg-white p-3 lg:w-72"
+          aria-label="Project navigator"
+        >
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Workspace</p>
               <h1 className="text-xl font-semibold">Kural</h1>
             </div>
-            <button className="rounded bg-slate-950 px-3 py-2 text-sm text-white" onClick={createNewProject}>
+            <button
+              type="button"
+              className="rounded bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-slate-400"
+              onClick={createNewProject}
+            >
               New
             </button>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2" role="list">
             {projects.map((project) => (
               <button
+                type="button"
                 key={project.id}
-                className={`w-full rounded border px-3 py-2 text-left text-sm ${
+                role="listitem"
+                aria-current={project.id === activeProjectId ? "true" : "false"}
+                className={`w-full rounded border px-3 py-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
                   project.id === activeProjectId
                     ? "border-slate-950 bg-slate-950 text-white"
                     : "border-slate-200 bg-white text-slate-800 hover:border-slate-400"
@@ -1024,15 +905,25 @@ export default function Home() {
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2">
-            <button className="rounded border border-slate-300 px-2 py-2 text-sm" onClick={exportActiveProject}>
+            <button
+              type="button"
+              className="rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+              onClick={exportActiveProject}
+            >
               Export
             </button>
-            <label className="cursor-pointer rounded border border-slate-300 px-2 py-2 text-center text-sm">
+            <label className="cursor-pointer rounded border border-slate-300 px-2 py-2 text-center text-sm focus-within:ring-2 focus-within:ring-slate-400">
               Import
-              <input className="hidden" type="file" accept=".kuralproj,.zip" onChange={importProjectFile} />
+              <input
+                className="hidden"
+                type="file"
+                accept=".kuralproj,.zip"
+                onChange={importProjectFile}
+              />
             </label>
             <button
-              className="col-span-2 rounded border border-red-300 px-2 py-2 text-sm text-red-700 disabled:opacity-40"
+              type="button"
+              className="col-span-2 rounded border border-red-300 px-2 py-2 text-sm text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-40"
               disabled={projects.length <= 1}
               onClick={() => void removeActiveProject()}
             >
@@ -1040,60 +931,85 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="mt-4 rounded border border-slate-200 p-3 text-xs text-slate-600">
+          <div
+            className="mt-4 rounded border border-slate-200 p-3 text-xs text-slate-600"
+            aria-live="polite"
+          >
             <p>Backend: {backendStatus || "checking"}</p>
             <p>API: {apiUrl}</p>
-            {backendError && <p className="mt-2 text-red-700">{backendError}</p>}
-            {workspaceError && <p className="mt-2 text-red-700">{workspaceError}</p>}
+            {backendError && (
+              <p className="mt-2 text-red-700" role="alert">
+                {backendError}
+              </p>
+            )}
+            {workspaceError && (
+              <p className="mt-2 text-red-700" role="alert">
+                {workspaceError}
+              </p>
+            )}
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1">
+        <section id="workspace" className="min-w-0 flex-1" aria-label="Workspace">
           <div className="rounded border border-slate-300 bg-white">
             <div className="flex flex-col gap-3 border-b border-slate-200 p-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="grid gap-2 md:grid-cols-[minmax(0,2fr)_1fr_1fr]">
                 <label className="text-sm">
                   Project name
                   <input
-                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                     value={activeProject?.name || ""}
-                    onChange={(event) => updateActiveProjectFields({ name: event.target.value })}
+                    onChange={(event) =>
+                      updateActiveProjectFields({ name: event.target.value })
+                    }
                   />
                 </label>
                 <label className="text-sm">
                   Source
                   <input
-                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                     value={activeProject?.sourceLanguage || "en-US"}
-                    onChange={(event) => updateActiveProjectFields({ sourceLanguage: event.target.value })}
+                    onChange={(event) =>
+                      updateActiveProjectFields({ sourceLanguage: event.target.value })
+                    }
                   />
                 </label>
                 <label className="text-sm">
                   Target
                   <input
-                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                     value={activeProject?.targetLanguage || "en-US"}
-                    onChange={(event) => updateActiveProjectFields({ targetLanguage: event.target.value })}
+                    onChange={(event) =>
+                      updateActiveProjectFields({ targetLanguage: event.target.value })
+                    }
                   />
                 </label>
               </div>
-              <nav className="flex flex-wrap gap-2">
-                {(["write", "dubbing", "pronunciation", "library"] as WorkspaceView[]).map((view) => (
-                  <button
-                    key={view}
-                    className={`rounded border px-3 py-2 text-sm capitalize ${
-                      activeView === view ? "border-slate-950 bg-slate-950 text-white" : "border-slate-300"
-                    }`}
-                    onClick={() => setActiveView(view)}
-                  >
-                    {view}
-                  </button>
-                ))}
+              <nav className="flex flex-wrap gap-2" aria-label="Workspace views">
+                {(["write", "dubbing", "pronunciation", "library"] as WorkspaceView[]).map(
+                  (view) => (
+                    <button
+                      type="button"
+                      key={view}
+                      aria-pressed={activeView === view}
+                      className={`rounded border px-3 py-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                        activeView === view
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-slate-300"
+                      }`}
+                      onClick={() => setActiveView(view)}
+                    >
+                      {view}
+                    </button>
+                  )
+                )}
               </nav>
             </div>
 
             {activeView === "write" && (!activeProject || !activeDocument) && (
-              <div className="p-4 text-sm text-slate-500">Loading workspace...</div>
+              <div className="p-4 text-sm text-slate-500" role="status" aria-live="polite">
+                Loading workspace...
+              </div>
             )}
 
             {activeView === "write" && activeProject && activeDocument && (
@@ -1101,16 +1017,24 @@ export default function Home() {
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-2">
                     <button
-                      className={`rounded border px-3 py-2 text-sm ${
-                        mode === "single" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-300"
+                      type="button"
+                      aria-pressed={mode === "single"}
+                      className={`rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                        mode === "single"
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-slate-300"
                       }`}
                       onClick={() => updateMode("single")}
                     >
                       Single
                     </button>
                     <button
-                      className={`rounded border px-3 py-2 text-sm ${
-                        mode === "batch" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-300"
+                      type="button"
+                      aria-pressed={mode === "batch"}
+                      className={`rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                        mode === "batch"
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-slate-300"
                       }`}
                       onClick={() => updateMode("batch")}
                     >
@@ -1118,7 +1042,6 @@ export default function Home() {
                     </button>
                     <label className="flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm">
                       <input
-                        aria-label="SSML"
                         type="checkbox"
                         checked={ssmlEnabled}
                         onChange={(event) => setSsmlEnabled(event.target.checked)}
@@ -1131,7 +1054,7 @@ export default function Home() {
                     Text
                     <textarea
                       id="script-text"
-                      className="mt-2 min-h-72 w-full resize-y rounded border border-slate-300 px-3 py-3 font-mono text-sm leading-6"
+                      className="mt-2 min-h-72 w-full resize-y rounded border border-slate-300 px-3 py-3 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       value={activeDocument?.text || ""}
                       onChange={(event) => updateDocumentText(event.target.value)}
                       placeholder={
@@ -1142,19 +1065,37 @@ export default function Home() {
                     />
                   </label>
 
-                  {error && <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+                  {error && (
+                    <p
+                      className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                      role="alert"
+                      aria-live="assertive"
+                    >
+                      {error}
+                    </p>
+                  )}
                   {success && (
-                    <p className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                    <p
+                      className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+                      role="status"
+                      aria-live="polite"
+                    >
                       {success}
                     </p>
                   )}
 
                   <button
-                    className="rounded bg-emerald-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                    type="button"
+                    className="rounded bg-emerald-700 px-4 py-3 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:opacity-50"
                     disabled={isGenerating || !selectedVoiceKey}
                     onClick={() => void generateAudio()}
+                    aria-busy={isGenerating}
                   >
-                    {isGenerating ? "Generating..." : mode === "batch" ? "Generate Batch" : "Generate Audio"}
+                    {isGenerating
+                      ? "Generating..."
+                      : mode === "batch"
+                        ? "Generate Batch"
+                        : "Generate Audio"}
                   </button>
                 </div>
 
@@ -1170,24 +1111,33 @@ export default function Home() {
                     onVoiceChange={setSelectedVoiceKey}
                   />
 
-                  <section className="rounded border border-slate-300 p-3">
-                    <h2 className="mb-2 font-semibold">Voice Presets</h2>
+                  <section
+                    className="rounded border border-slate-300 p-3"
+                    aria-labelledby="presets-heading"
+                  >
+                    <h2 id="presets-heading" className="mb-2 font-semibold">Voice Presets</h2>
                     <div className="flex gap-2">
                       <input
-                        className="min-w-0 flex-1 rounded border border-slate-300 px-3 py-2 text-sm"
+                        className="min-w-0 flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                         value={presetName}
                         onChange={(event) => setPresetName(event.target.value)}
                         placeholder="Preset name"
+                        aria-label="Preset name"
                       />
-                      <button className="rounded border border-slate-300 px-3 py-2 text-sm" onClick={saveVoicePreset}>
+                      <button
+                        type="button"
+                        className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                        onClick={saveVoicePreset}
+                      >
                         Save
                       </button>
                     </div>
                     <div className="mt-3 space-y-2">
                       {activeProject?.voicePresets.map((preset) => (
                         <button
+                          type="button"
                           key={preset.id}
-                          className="w-full rounded border border-slate-200 px-3 py-2 text-left text-sm"
+                          className="w-full rounded border border-slate-200 px-3 py-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                           onClick={() => applyVoicePreset(preset)}
                         >
                           {preset.name} - {preset.voiceLabel}
@@ -1216,37 +1166,59 @@ export default function Home() {
                     onDeleteClone={(id) => void deleteClone(id)}
                   />
 
-                  <AudioLibrary assets={assets} audioUrls={audioUrls} onDelete={(id) => void deleteAsset(id)} />
+                  <AudioLibrary
+                    assets={assets}
+                    audioUrls={audioUrls}
+                    onDelete={(id) => void deleteAsset(id)}
+                  />
                 </div>
               </div>
             )}
 
             {activeView === "dubbing" && !activeProject && (
-              <div className="p-4 text-sm text-slate-500">Loading workspace...</div>
+              <div className="p-4 text-sm text-slate-500" role="status" aria-live="polite">
+                Loading workspace...
+              </div>
             )}
 
             {activeView === "dubbing" && activeProject && (
               <div className="space-y-4 p-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm">
+                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-slate-400">
                     Import SRT/VTT/CSV/Text
-                    <input className="hidden" type="file" accept=".srt,.vtt,.csv,.txt" onChange={importTranscriptFile} />
+                    <input
+                      className="hidden"
+                      type="file"
+                      accept=".srt,.vtt,.csv,.txt"
+                      onChange={importTranscriptFile}
+                    />
                   </label>
-                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm">
+                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-slate-400">
                     Import Audio/Video
-                    <input className="hidden" type="file" accept="audio/*,video/mp4,video/quicktime" onChange={transcribeMediaFile} />
+                    <input
+                      className="hidden"
+                      type="file"
+                      accept="audio/*,video/mp4,video/quicktime"
+                      onChange={transcribeMediaFile}
+                    />
                   </label>
                   <button
-                    className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+                    type="button"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
                     disabled={isTranslating || activeProject.dubbingSegments.length === 0}
                     onClick={() => void translateAllSegments()}
+                    aria-busy={isTranslating}
                   >
                     {isTranslating ? "Translating..." : "Translate All"}
                   </button>
-                  <button className="rounded border border-slate-300 px-3 py-2 text-sm" onClick={exportDubbingTimeline}>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    onClick={exportDubbingTimeline}
+                  >
                     Export WAV Timeline
                   </button>
-                  <span className="text-sm text-slate-500">
+                  <span className="text-sm text-slate-500" role="status" aria-live="polite">
                     {isTranscribing
                       ? "Transcribing..."
                       : `${activeProject?.dubbingSegments.length || 0} transcript segments`}
@@ -1256,12 +1228,20 @@ export default function Home() {
 
                 <div className="space-y-3">
                   {activeProject?.dubbingSegments.map((segment, index) => {
-                    const asset = assets.find((candidate) => candidate.id === segment.audioAssetId);
-                    const duration = segment.audioAssetId ? assetDurations[segment.audioAssetId] || 0 : 0;
+                    const asset = assets.find(
+                      (candidate) => candidate.id === segment.audioAssetId
+                    );
+                    const duration = segment.audioAssetId
+                      ? assetDurations[segment.audioAssetId] || 0
+                      : 0;
                     const limit = segment.endMs - segment.startMs;
                     const overrun = duration > 0 && duration > limit;
                     return (
-                      <section key={segment.id} className="rounded border border-slate-300 p-3">
+                      <section
+                        key={segment.id}
+                        className="rounded border border-slate-300 p-3"
+                        aria-label={`Segment ${index + 1}`}
+                      >
                         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <h3 className="font-medium">
@@ -1273,16 +1253,19 @@ export default function Home() {
                           </div>
                           <div className="flex flex-wrap gap-2">
                             <button
-                              className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+                              type="button"
+                              className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
                               disabled={isTranslating}
                               onClick={() => void translateSegment(segment)}
                             >
                               Translate
                             </button>
                             <button
-                              className="rounded bg-slate-950 px-3 py-2 text-sm text-white disabled:opacity-50"
+                              type="button"
+                              className="rounded bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
                               disabled={segment.status === "rendering"}
                               onClick={() => void renderSegment(segment)}
+                              aria-busy={segment.status === "rendering"}
                             >
                               {segment.status === "rendering" ? "Rendering..." : "Render Segment"}
                             </button>
@@ -1292,25 +1275,35 @@ export default function Home() {
                           <label className="text-sm">
                             Source text
                             <textarea
-                              className="mt-1 min-h-28 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                              className="mt-1 min-h-28 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                               value={segment.sourceText}
-                              onChange={(event) => updateSegment(segment.id, { sourceText: event.target.value })}
+                              onChange={(event) =>
+                                updateSegment(segment.id, { sourceText: event.target.value })
+                              }
                             />
                           </label>
                           <label className="text-sm">
                             Target text
                             <textarea
-                              className="mt-1 min-h-28 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                              className="mt-1 min-h-28 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                               value={segment.targetText}
-                              onChange={(event) => updateSegment(segment.id, { targetText: event.target.value })}
+                              onChange={(event) =>
+                                updateSegment(segment.id, { targetText: event.target.value })
+                              }
                             />
                           </label>
                         </div>
                         <div className="mt-3 grid gap-2 md:grid-cols-4">
+                          <label className="sr-only" htmlFor={`segment-voice-${segment.id}`}>
+                            Voice for segment {index + 1}
+                          </label>
                           <select
-                            className="rounded border border-slate-300 px-3 py-2 text-sm"
+                            id={`segment-voice-${segment.id}`}
+                            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                             value={segment.voiceId || selectedVoiceKey}
-                            onChange={(event) => updateSegment(segment.id, { voiceId: event.target.value })}
+                            onChange={(event) =>
+                              updateSegment(segment.id, { voiceId: event.target.value })
+                            }
                           >
                             {voiceOptions.map((option) => (
                               <option key={option.key} value={option.key}>
@@ -1319,12 +1312,13 @@ export default function Home() {
                             ))}
                           </select>
                           <input
-                            className="rounded border border-slate-300 px-3 py-2 text-sm"
+                            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                             type="number"
                             min={0.5}
                             max={2}
                             step={0.05}
                             value={segment.controls.speed}
+                            aria-label={`Speed for segment ${index + 1}`}
                             onChange={(event) =>
                               updateSegment(segment.id, {
                                 controls: { ...segment.controls, speed: Number(event.target.value) },
@@ -1332,19 +1326,34 @@ export default function Home() {
                             }
                           />
                           <input
-                            className="rounded border border-slate-300 px-3 py-2 text-sm"
+                            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                             value={segment.notes}
-                            onChange={(event) => updateSegment(segment.id, { notes: event.target.value })}
+                            onChange={(event) =>
+                              updateSegment(segment.id, { notes: event.target.value })
+                            }
                             placeholder="Notes"
+                            aria-label={`Notes for segment ${index + 1}`}
                           />
-                          <span className="rounded border border-slate-200 px-3 py-2 text-sm">
+                          <span
+                            className="rounded border border-slate-200 px-3 py-2 text-sm"
+                            aria-live="polite"
+                          >
                             {segment.status}
                           </span>
                         </div>
                         {asset && audioUrls[asset.id] && (
-                          <audio className="mt-3 w-full" controls src={audioUrls[asset.id]} />
+                          <audio
+                            className="mt-3 w-full"
+                            controls
+                            src={audioUrls[asset.id]}
+                            aria-label={`Rendered audio for segment ${index + 1}`}
+                          />
                         )}
-                        {segment.error && <p className="mt-2 text-sm text-red-700">{segment.error}</p>}
+                        {segment.error && (
+                          <p className="mt-2 text-sm text-red-700" role="alert">
+                            {segment.error}
+                          </p>
+                        )}
                       </section>
                     );
                   })}
@@ -1359,54 +1368,81 @@ export default function Home() {
 
             {activeView === "pronunciation" && (
               <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-                <section className="space-y-3">
+                <section className="space-y-3" aria-label="Pronunciation rules">
                   <div className="flex flex-wrap gap-2">
                     <input
-                      className="min-w-0 flex-1 rounded border border-slate-300 px-3 py-2 text-sm"
+                      className="min-w-0 flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                       value={newRulePattern}
                       onChange={(event) => setNewRulePattern(event.target.value)}
                       placeholder="Pattern"
+                      aria-label="New rule pattern"
                     />
                     <input
-                      className="min-w-0 flex-1 rounded border border-slate-300 px-3 py-2 text-sm"
+                      className="min-w-0 flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                       value={newRuleReplacement}
                       onChange={(event) => setNewRuleReplacement(event.target.value)}
                       placeholder="Replacement"
+                      aria-label="New rule replacement"
                     />
-                    <button className="rounded border border-slate-300 px-3 py-2 text-sm" onClick={addPronunciationRule}>
+                    <button
+                      type="button"
+                      className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                      onClick={addPronunciationRule}
+                    >
                       Add Rule
                     </button>
                   </div>
 
                   <div className="space-y-2">
                     {activeProfile?.rules.map((rule) => (
-                      <div key={rule.id} className="grid gap-2 rounded border border-slate-300 p-3 md:grid-cols-6">
+                      <div
+                        key={rule.id}
+                        className="grid gap-2 rounded border border-slate-300 p-3 md:grid-cols-6"
+                      >
                         <input
-                          className="rounded border border-slate-300 px-2 py-2 text-sm md:col-span-2"
+                          className="rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 md:col-span-2"
                           value={rule.pattern}
-                          onChange={(event) => updateRule(rule.id, { pattern: event.target.value })}
+                          aria-label="Pattern"
+                          onChange={(event) =>
+                            updateRule(rule.id, { pattern: event.target.value })
+                          }
                         />
                         <input
-                          className="rounded border border-slate-300 px-2 py-2 text-sm md:col-span-2"
+                          className="rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 md:col-span-2"
                           value={rule.replacement}
-                          onChange={(event) => updateRule(rule.id, { replacement: event.target.value })}
+                          aria-label="Replacement"
+                          onChange={(event) =>
+                            updateRule(rule.id, { replacement: event.target.value })
+                          }
                         />
                         <select
-                          className="rounded border border-slate-300 px-2 py-2 text-sm"
+                          className="rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                           value={rule.mode}
-                          onChange={(event) => updateRule(rule.id, { mode: event.target.value as PronunciationRule["mode"] })}
+                          aria-label="Mode"
+                          onChange={(event) =>
+                            updateRule(rule.id, {
+                              mode: event.target.value as PronunciationRule["mode"],
+                            })
+                          }
                         >
                           <option value="word">Word</option>
                           <option value="literal">Literal</option>
                         </select>
-                        <button className="rounded border border-red-300 px-2 py-2 text-sm text-red-700" onClick={() => deleteRule(rule.id)}>
+                        <button
+                          type="button"
+                          className="rounded border border-red-300 px-2 py-2 text-sm text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400"
+                          aria-label={`Delete rule: ${rule.pattern || "unnamed"}`}
+                          onClick={() => deleteRule(rule.id)}
+                        >
                           Delete
                         </button>
                         <label className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
                             checked={rule.enabled}
-                            onChange={(event) => updateRule(rule.id, { enabled: event.target.checked })}
+                            onChange={(event) =>
+                              updateRule(rule.id, { enabled: event.target.checked })
+                            }
                           />
                           Enabled
                         </label>
@@ -1414,21 +1450,29 @@ export default function Home() {
                           <input
                             type="checkbox"
                             checked={rule.caseSensitive}
-                            onChange={(event) => updateRule(rule.id, { caseSensitive: event.target.checked })}
+                            onChange={(event) =>
+                              updateRule(rule.id, { caseSensitive: event.target.checked })
+                            }
                           />
                           Case sensitive
                         </label>
                         <input
-                          className="rounded border border-slate-300 px-2 py-2 text-sm"
+                          className="rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                           value={rule.language}
-                          onChange={(event) => updateRule(rule.id, { language: event.target.value })}
+                          aria-label="Language"
+                          onChange={(event) =>
+                            updateRule(rule.id, { language: event.target.value })
+                          }
                           placeholder="Language"
                         />
                         <input
-                          className="rounded border border-slate-300 px-2 py-2 text-sm"
+                          className="rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                           type="number"
                           value={rule.priority}
-                          onChange={(event) => updateRule(rule.id, { priority: Number(event.target.value) })}
+                          aria-label="Priority"
+                          onChange={(event) =>
+                            updateRule(rule.id, { priority: Number(event.target.value) })
+                          }
                           placeholder="Priority"
                         />
                       </div>
@@ -1436,23 +1480,40 @@ export default function Home() {
                   </div>
                 </section>
 
-                <section className="rounded border border-slate-300 p-3">
-                  <h2 className="font-semibold">Profile Preview</h2>
+                <section
+                  className="rounded border border-slate-300 p-3"
+                  aria-labelledby="profile-preview-heading"
+                >
+                  <h2 id="profile-preview-heading" className="font-semibold">Profile Preview</h2>
                   <textarea
-                    className="mt-2 min-h-32 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                    className="mt-2 min-h-32 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                     value={activeProfile?.previewText || ""}
+                    aria-label="Profile preview source text"
                     onChange={(event) =>
-                      activeProfile && updatePronunciationProfile({ ...activeProfile, previewText: event.target.value })
+                      activeProfile &&
+                      updatePronunciationProfile({
+                        ...activeProfile,
+                        previewText: event.target.value,
+                      })
                     }
                   />
-                  <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm">{previewText}</div>
+                  <div
+                    className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm"
+                    aria-live="polite"
+                  >
+                    {previewText}
+                  </div>
                 </section>
               </div>
             )}
 
             {activeView === "library" && (
               <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-                <AudioLibrary assets={assets} audioUrls={audioUrls} onDelete={(id) => void deleteAsset(id)} />
+                <AudioLibrary
+                  assets={assets}
+                  audioUrls={audioUrls}
+                  onDelete={(id) => void deleteAsset(id)}
+                />
                 <ClonePanel
                   cloneBusy={cloneBusy}
                   cloneConsent={cloneConsent}
@@ -1472,299 +1533,16 @@ export default function Home() {
               </div>
             )}
           </div>
-          {voicesError && <p className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{voicesError}</p>}
+          {voicesError && (
+            <p
+              className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              role="alert"
+            >
+              {voicesError}
+            </p>
+          )}
         </section>
       </div>
     </main>
-  );
-}
-
-function LocalModelPanel(props: { models: LocalModelInfo[]; error: string | null }) {
-  const workflowModels = props.models.filter((model) => model.category === "asr" || model.category === "translation");
-  const ready = workflowModels.filter((model) => model.status === "ready").length;
-  return (
-    <section className="rounded border border-slate-300 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-semibold">Local Models</h2>
-        <span className="text-xs uppercase text-slate-500">
-          {ready}/{workflowModels.length} ready
-        </span>
-      </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        {workflowModels.map((model) => (
-          <div key={model.id} className="rounded border border-slate-200 px-3 py-2 text-sm">
-            <div className="flex items-start justify-between gap-2">
-              <span className="font-medium">{model.name}</span>
-              <span
-                className={`rounded px-2 py-0.5 text-xs ${
-                  model.status === "ready"
-                    ? "bg-emerald-100 text-emerald-800"
-                    : model.status === "disabled"
-                      ? "bg-amber-100 text-amber-800"
-                      : "bg-slate-100 text-slate-700"
-                }`}
-              >
-                {model.status.replace("_", " ")}
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-slate-500">
-              {model.provider} / {model.license || "local"}
-            </p>
-            {model.detail && <p className="mt-1 text-xs text-slate-600">{model.detail}</p>}
-          </div>
-        ))}
-      </div>
-      {props.error && <p className="mt-2 text-sm text-red-700">{props.error}</p>}
-      {workflowModels.length === 0 && <p className="mt-2 text-sm text-slate-500">No local model adapters reported.</p>}
-    </section>
-  );
-}
-
-function ControlPanel(props: {
-  controls: AudioControls;
-  languageFilter: string;
-  languages: string[];
-  selectedVoiceKey: string;
-  voiceOptions: Array<{ key: string; label: string }>;
-  onControlsChange: (controls: AudioControls) => void;
-  onLanguageFilterChange: (language: string) => void;
-  onVoiceChange: (voice: string) => void;
-}) {
-  const { controls, onControlsChange } = props;
-  return (
-    <section className="rounded border border-slate-300 p-3">
-      <h2 className="mb-3 font-semibold">Advanced Audio</h2>
-      <div className="space-y-3">
-        <label className="block text-sm">
-          Language filter
-          <select
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={props.languageFilter}
-            onChange={(event) => props.onLanguageFilterChange(event.target.value)}
-          >
-            {props.languages.map((language) => (
-              <option key={language} value={language}>
-                {language === "all" ? "All languages" : language}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          Voice
-          <select
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={props.selectedVoiceKey}
-            onChange={(event) => props.onVoiceChange(event.target.value)}
-          >
-            {props.voiceOptions.map((option) => (
-              <option key={option.key} value={option.key}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          Speed {controls.speed.toFixed(2)}
-          <input
-            className="mt-1 w-full"
-            type="range"
-            min={0.5}
-            max={2}
-            step={0.05}
-            value={controls.speed}
-            onChange={(event) => onControlsChange({ ...controls, speed: Number(event.target.value) })}
-          />
-        </label>
-        <label className="block text-sm">
-          Pitch {controls.pitchSemitones.toFixed(1)} st
-          <input
-            className="mt-1 w-full"
-            type="range"
-            min={-6}
-            max={6}
-            step={0.5}
-            value={controls.pitchSemitones}
-            onChange={(event) => onControlsChange({ ...controls, pitchSemitones: Number(event.target.value) })}
-          />
-        </label>
-        <label className="block text-sm">
-          Volume {controls.volumeDb.toFixed(1)} dB
-          <input
-            className="mt-1 w-full"
-            type="range"
-            min={-12}
-            max={6}
-            step={0.5}
-            value={controls.volumeDb}
-            onChange={(event) => onControlsChange({ ...controls, volumeDb: Number(event.target.value) })}
-          />
-        </label>
-        <label className="block text-sm">
-          Pause scale {controls.pauseScale.toFixed(2)}
-          <input
-            className="mt-1 w-full"
-            type="range"
-            min={0.25}
-            max={3}
-            step={0.05}
-            value={controls.pauseScale}
-            onChange={(event) => onControlsChange({ ...controls, pauseScale: Number(event.target.value) })}
-          />
-        </label>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={controls.normalize}
-              onChange={(event) => onControlsChange({ ...controls, normalize: event.target.checked })}
-            />
-            Normalize
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={controls.trimSilence}
-              onChange={(event) => onControlsChange({ ...controls, trimSilence: event.target.checked })}
-            />
-            Trim silence
-          </label>
-        </div>
-        <label className="block text-sm">
-          Format
-          <select
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={controls.format}
-            onChange={(event) => onControlsChange({ ...controls, format: event.target.value as OutputFormat })}
-          >
-            <option value="wav">WAV</option>
-            <option value="mp3">MP3</option>
-          </select>
-        </label>
-      </div>
-    </section>
-  );
-}
-
-function AudioLibrary(props: {
-  assets: AudioAsset[];
-  audioUrls: Record<string, string>;
-  onDelete: (id: string) => void;
-}) {
-  return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-lg font-semibold">Audio Library</h2>
-        <p className="text-sm text-slate-500">{props.assets.length} local clips in this project</p>
-      </div>
-      {props.assets.map((asset) => (
-        <article key={asset.id} className="rounded border border-slate-300 p-3">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <button className="max-w-xl text-left text-sm font-medium" onClick={() => props.audioUrls[asset.id] && downloadBlob(asset.blob, `${asset.name}.${asset.format}`)}>
-              {asset.text}
-            </button>
-            <button className="rounded border border-red-300 px-2 py-1 text-xs text-red-700" onClick={() => props.onDelete(asset.id)}>
-              Delete
-            </button>
-          </div>
-          <p className="mt-1 text-xs uppercase text-slate-500">
-            {asset.voiceLabel} / {asset.format.toUpperCase()} / {(asset.bytes / 1024).toFixed(1)} KB
-          </p>
-          {props.audioUrls[asset.id] && <audio className="mt-2 w-full" controls src={props.audioUrls[asset.id]} />}
-        </article>
-      ))}
-      {props.assets.length === 0 && <p className="rounded border border-slate-200 p-4 text-sm text-slate-500">No clips yet.</p>}
-    </section>
-  );
-}
-
-function ClonePanel(props: {
-  cloneBusy: boolean;
-  cloneConsent: boolean;
-  cloneLanguage: string;
-  cloneMessage: string;
-  cloneName: string;
-  clones: ClonedVoiceInfo[];
-  onCloneConsentChange: (value: boolean) => void;
-  onCloneExport: () => void;
-  onCloneFileChange: (value: File | null) => void;
-  onCloneImport: (event: ChangeEvent<HTMLInputElement>) => void;
-  onCloneLanguageChange: (value: string) => void;
-  onCloneNameChange: (value: string) => void;
-  onCloneUpload: () => void;
-  onDeleteClone: (id: string) => void;
-}) {
-  return (
-    <section className="rounded border border-slate-300 p-3">
-      <h2 className="font-semibold">Clone a Voice</h2>
-      <div className="mt-3 space-y-3">
-        <label className="block text-sm">
-          Audio sample
-          <input
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
-            type="file"
-            accept="audio/*"
-            onChange={(event) => props.onCloneFileChange(event.target.files?.[0] ?? null)}
-          />
-        </label>
-        <label className="block text-sm">
-          Voice name
-          <input
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={props.cloneName}
-            onChange={(event) => props.onCloneNameChange(event.target.value)}
-          />
-        </label>
-        <label className="block text-sm">
-          Language
-          <input
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={props.cloneLanguage}
-            onChange={(event) => props.onCloneLanguageChange(event.target.value)}
-          />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={props.cloneConsent}
-            onChange={(event) => props.onCloneConsentChange(event.target.checked)}
-          />
-          I have consent to clone and use this voice.
-        </label>
-        <button
-          className="rounded bg-slate-950 px-3 py-2 text-sm text-white disabled:opacity-50"
-          disabled={props.cloneBusy}
-          onClick={props.onCloneUpload}
-        >
-          Clone Voice
-        </button>
-        {props.cloneMessage && <p className="text-sm text-slate-700">{props.cloneMessage}</p>}
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button className="rounded border border-slate-300 px-3 py-2 text-sm" onClick={props.onCloneExport}>
-          Export Voices
-        </button>
-        <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm">
-          Import Voices
-          <input id="clone-archive-file" className="hidden" type="file" accept=".zip" onChange={props.onCloneImport} />
-        </label>
-      </div>
-
-      <div className="mt-4 space-y-2">
-        {props.clones.map((clone) => (
-          <div key={clone.id} className="rounded border border-slate-200 px-3 py-2 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span>
-                {clone.name} {clone.language ? `(${clone.language})` : ""}
-              </span>
-              <button className="rounded border border-red-300 px-2 py-1 text-xs text-red-700" onClick={() => props.onDeleteClone(clone.id)}>
-                Delete
-              </button>
-            </div>
-          </div>
-        ))}
-        {props.clones.length === 0 && <p className="text-sm text-slate-500">No cloned voices yet.</p>}
-      </div>
-    </section>
   );
 }

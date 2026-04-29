@@ -113,9 +113,17 @@ kural voices --clones
 | GET | `/api/local-models` | Inspect optional local ASR/translation adapters |
 | POST | `/api/transcribe` | Transcribe local audio/video into dubbing segments |
 | POST | `/api/translate` | Translate local script text with installed packages |
-| GET | `/api/health` | Health check |
+| GET | `/api/health` | Health check (also exposed at `/healthz` for Docker) |
 
-Voice clone samples must be WAV/MP3 audio, 5-30 seconds long, no larger than 25 MB, and submitted with explicit consent confirmation.
+Voice clone samples must be WAV/MP3 audio, 5-30 seconds long, no larger than 25 MB, and submitted with explicit consent confirmation. Each accepted upload appends a JSON record to `CONSENT_LOG_PATH` (`~/.cache/kural/consent.log` by default) capturing the voice ID, sample SHA-256, requesting IP, and the consent statement that was in effect.
+
+### Hardening for networked deployments
+
+The API is unauthenticated by default to keep the single-user offline workflow friction-free. Set `KURAL_API_KEY` to require a shared `X-API-Key` header on every `/api/*` request. The Docker compose stack binds to `127.0.0.1` by default — set `KURAL_BIND=0.0.0.0` (and `KURAL_API_KEY`) to expose on a LAN. `RATE_LIMIT_SYNTHESIZE` and `RATE_LIMIT_CLONE` accept any [slowapi syntax](https://slowapi.readthedocs.io/) (e.g. `30/minute`, `5/second`).
+
+### Single-tenant by design
+
+Kural assumes one user per backend process. The Kokoro and Chatterbox engines are shared across requests via a thread-safe registry, and the cloned-voice cache lives at one location per process (`CLONE_CACHE_DIR`). For multi-tenant or LAN deployments, run one container per tenant — there is no built-in per-user isolation.
 
 The creator UI stores projects locally in IndexedDB. A project can contain script documents, generated audio assets, voice presets, pronunciation profiles, and transcript-file dubbing segments. Use `.kuralproj` export/import when you want a portable offline archive.
 

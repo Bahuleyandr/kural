@@ -49,6 +49,7 @@ desktop/target/tauri-release.conf.json
 .DS_Store
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~

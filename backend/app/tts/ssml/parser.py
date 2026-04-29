@@ -1,28 +1,17 @@
+"""SSML walker — turns the supported subset of <speak> markup into segments."""
 from __future__ import annotations
 
-import io
 import re
-import wave
-from dataclasses import dataclass
-from typing import Any, Iterable, Sequence
-from xml.etree import ElementTree
+from typing import Any, Sequence
 
-from ..config import settings
-from .pronunciation import apply_pronunciation_rules
-
-
-@dataclass(frozen=True)
-class TextSegment:
-    text: str
-
-
-@dataclass(frozen=True)
-class BreakSegment:
-    milliseconds: int
-
-
-SpeechSegment = TextSegment | BreakSegment
-WaveParams = tuple[int, int, int, int, str, str]
+from ..pronunciation import apply_pronunciation_rules
+from .types import (
+    BreakSegment,
+    ElementTree,
+    ParseError,
+    SpeechSegment,
+    TextSegment,
+)
 
 _ALLOWED_TAGS = {
     "speak",
@@ -252,7 +241,7 @@ def parse_ssml(
     xml_source = source if source.startswith("<speak") else f"<speak>{source}</speak>"
     try:
         root = ElementTree.fromstring(xml_source)
-    except ElementTree.ParseError as exc:
+    except ParseError as exc:
         raise ValueError(f"Invalid SSML: {exc}") from exc
 
     if _tag_name(root) != "speak":
@@ -271,58 +260,3 @@ def parse_ssml(
     if not any(isinstance(segment, TextSegment) for segment in expanded):
         raise ValueError("SSML must contain text to synthesize.")
     return expanded
-
-
-def stitch_wav_sequence(parts: Iterable[bytes | BreakSegment], pause_scale: float = 1.0) -> bytes:
-    params: WaveParams | None = None
-    frames: list[bytes] = []
-    pending_break_ms = 0
-
-    def silence(milliseconds: int, wav_params: WaveParams) -> bytes:
-        channels, sample_width, sample_rate = wav_params[:3]
-        frame_count = int(sample_rate * milliseconds / 1000)
-        return b"\x00" * frame_count * sample_width * channels
-
-    for part in parts:
-        if isinstance(part, BreakSegment):
-            milliseconds = int(part.milliseconds * pause_scale)
-            if params is None:
-                pending_break_ms += milliseconds
-                continue
-            frames.append(silence(milliseconds, params))
-            continue
-
-        with wave.open(io.BytesIO(part), "rb") as reader:
-            current = reader.getparams()
-            current_params: WaveParams = (
-                current.nchannels,
-                current.sampwidth,
-                current.framerate,
-                0,
-                current.comptype,
-                current.compname,
-            )
-            if params is None:
-                params = current_params
-                if pending_break_ms:
-                    frames.append(silence(pending_break_ms, params))
-                    pending_break_ms = 0
-            elif (
-                current_params[0] != params[0]
-                or current_params[1] != params[1]
-                or current_params[2] != params[2]
-                or current_params[4] != params[4]
-            ):
-                raise ValueError("Generated audio chunks used incompatible WAV settings.")
-            frames.append(reader.readframes(reader.getnframes()))
-
-    if params is None:
-        params = (1, 2, settings.sample_rate, 0, "NONE", "not compressed")
-        if pending_break_ms:
-            frames.append(silence(pending_break_ms, params))
-
-    output = io.BytesIO()
-    with wave.open(output, "wb") as writer:
-        writer.setparams(params)
-        writer.writeframes(b"".join(frames))
-    return output.getvalue()

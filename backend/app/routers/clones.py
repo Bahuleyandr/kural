@@ -2,11 +2,13 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
 from ..config import settings
+from ..consent import record_consent
 from ..models import ClonedVoiceInfo, ClonesImportResponse, ClonesListResponse
+from ..rate_limit import limiter
 from ..tts.chatterbox_engine import (
     delete_cloned_voice,
     export_cloned_voices,
@@ -39,7 +41,9 @@ def _error(code: str, message: str) -> dict[str, str]:
 
 
 @router.post("/voices/clone", response_model=ClonedVoiceInfo, status_code=201)
+@limiter.limit(lambda: settings.rate_limit_clone)
 async def clone_voice(
+    request: Request,
     file: UploadFile = File(..., description="WAV or MP3 audio sample (5–30 s)"),
     name: str = Form(..., min_length=1, max_length=100),
     language: str | None = Form(
@@ -97,7 +101,7 @@ async def clone_voice(
         )
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         meta = await loop.run_in_executor(
             _executor,
             lambda: save_voice_sample(
@@ -117,6 +121,14 @@ async def clone_voice(
             status_code=503,
             detail=_error("voice_clone_unavailable", str(exc)),
         ) from exc
+
+    record_consent(
+        voice_id=meta["id"],
+        voice_name=clean_name,
+        sample_bytes=audio_bytes,
+        client_host=request.client.host if request.client else None,
+        language=language.strip() if language else None,
+    )
 
     return ClonedVoiceInfo(**meta)
 
@@ -186,7 +198,7 @@ async def import_clones(
         )
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         imported = await loop.run_in_executor(
             _executor,
             lambda: import_voice_archive(archive_bytes),

@@ -13,8 +13,22 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:8080",
+        "http://127.0.0.1:3000",
     ]
     max_text_length: int = 10000
+
+    # Optional shared-secret API key. When set (KURAL_API_KEY env var), all
+    # /api/* requests must send X-API-Key. Empty string disables auth — the
+    # default for local single-user installs.
+    api_key: str = ""
+
+    # Per-IP rate limits, slowapi syntax. Synthesis is CPU-heavy; cloning
+    # writes durable state, so it stays tighter.
+    rate_limit_synthesize: str = "30/minute"
+    rate_limit_clone: str = "5/minute"
+
+    # Append-only consent audit log location.
+    consent_log_path: str = "~/.cache/kural/consent.log"
 
     # Kokoro model file locations (relative to model_cache_dir)
     model_cache_dir: str = "~/.cache/kural/kokoro"

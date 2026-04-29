@@ -1,49 +1,31 @@
 # Kural Roadmap
 
-## Stabilization
+## Shipped
 
-- UUID-only cloned voice IDs with path containment before read/delete.
-- Consent-gated clone uploads with sample size and duration limits.
-- Reproducible pnpm Docker frontend builds.
-- Persistent Docker volumes for Kokoro models and cloned voices.
-- Centralized application version and MIT license alignment.
-- Backend tests, frontend smoke tests, and CI checks.
+- Core TTS surface: Kokoro and Chatterbox engines wrapped behind a single FastAPI service, CLI, web UI, and Tauri desktop shell.
+- Reproducible Docker frontend builds; persistent volumes for Kokoro model cache and cloned voices.
+- Voice cloning with consent gating, append-only consent audit log, UUID-only IDs, path containment, sample size and duration limits.
+- Append-only consent audit trail (`CONSENT_LOG_PATH`) covering every accepted clone upload (timestamp, voice ID, sample SHA-256, requesting IP, consent statement version).
+- Optional `KURAL_API_KEY` shared-secret middleware on every `/api/*` route; default Docker compose binds to `127.0.0.1`.
+- Per-IP rate limits via slowapi (`RATE_LIMIT_SYNTHESIZE`, `RATE_LIMIT_CLONE`); FFmpeg subprocess timeout enforcement.
+- Hardened SSML parser (defusedxml) and tightened CORS configuration.
+- Thread-safe `EngineRegistry` for single-tenant lazy loading of Kokoro and Chatterbox engines.
+- Centralized application version, MIT license alignment, gitleaks + `pnpm audit --audit-level high`.
+- Backend tests (mocked), real Kokoro integration smoke test gated by `KURAL_RUN_INTEGRATION=1`, frontend unit tests for libraries and hooks, Playwright e2e smoke.
+- Creator workspace: projects, batch generation, long-document chunking, named pronunciation profiles, voice presets, transcript-file dubbing for SRT/VTT/CSV/TXT.
+- IndexedDB-backed audio library and `.kuralproj` import/export archives.
+- Voice clone import/export archives.
+- Optional ASR (faster-whisper, Vosk, whisper.cpp) and translation (Argos, IndicTrans2 pack, NLLB) adapters with `/api/local-models`, `/api/transcribe`, `/api/translate`.
+- Expanded SSML subset (pauses, emphasis, prosody fallback, phoneme fallback, pronunciation rules).
+- Advanced audio controls (speed, pitch, volume, normalization, silence trim, pause scaling, format).
+- Single Python entrypoint (`desktop/scripts/build_desktop.py`) shared by all four installer/release shell wrappers.
+- Frontend split into `app/components/`, `app/hooks/`, `app/lib/` modules with a Next.js error boundary; `apiFetch` wraps `X-API-Key` injection; `useApi` hook offers abort + 5s cache.
+- A11y pass: skip link, `aria-live` regions for status and errors, `aria-pressed`/`aria-current` on toggle buttons, focus rings on every interactive element.
 
-## Desktop
+## Next
 
-- Bundle the backend directory as a Tauri resource.
-- Keep Python runtime discovery explicit with `KURAL_PYTHON` and `KURAL_BACKEND_DIR`.
-- Show backend startup failures in the web UI.
-- Keep updater inactive until signing keys and distribution channel are selected.
-
-## Creator Product
-
-- Batch generation from blank-line separated text.
-- Project workspaces with local documents, audio assets, pronunciation profiles, and voice presets.
-- Named pronunciation profiles with ordered literal and whole-word rules.
-- Persistent project audio library via IndexedDB with migration from the original audio history.
-- True long-document chunk stitching.
-- Expanded SSML subset for pauses, emphasis, prosody fallback, phoneme fallback, and pronunciation.
-- Advanced controls for speed, pitch, volume, normalization, silence trimming, pause scaling, and format.
-- Transcript-file dubbing workflow for SRT, VTT, CSV, and plain text.
-- Optional local ASR adapters for faster-whisper, Vosk, and whisper.cpp.
-- Optional Argos Translate adapter for target-language drafts.
-- `.kuralproj` import/export archives for local project portability.
-- Multilingual-ready voice and clone metadata with language, locale, engine, and capabilities.
-- Voice-clone import/export archives for local portability.
-- WAV/MP3 export for Kokoro and WAV export for cloned voices.
-- Voice sample preview and clone consent guardrails.
-
-## Release
-
-- Explicit desktop backend runtime provisioning.
-- Release scripts for updater signing configuration.
-- Artifact smoke checks for desktop bundles and updater signatures.
-
-## Next Candidates
-
-- Full IndicTrans2 inference adapter after a local model-pack layout is selected.
+- Multilingual TTS adapter slots beyond Kokoro/Chatterbox (user-provided voice folders).
+- Full IndicTrans2 inference adapter once a local model-pack layout is finalised.
 - Optional local forced alignment for subtitle timing repair.
-- User-provided multilingual TTS voice folders.
-- User-defined voice folders.
-- Published signed desktop installers after signing keys and distribution accounts are available.
+- Published signed desktop installers — pending Windows/macOS signing certificates and a chosen distribution channel.
+- Upstream the manual rate-limit overrides in tests with a slowapi-aware fixture in `slowapi` itself.
