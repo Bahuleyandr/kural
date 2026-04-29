@@ -83,6 +83,24 @@ class TranscriptionResponse(BaseModel):
     segments: list[TranscriptionSegment] = Field(default_factory=list)
 
 
+class AlignmentWord(BaseModel):
+    text: str
+    start_ms: int = Field(..., ge=0)
+    end_ms: int = Field(..., ge=0)
+    probability: Optional[float] = None
+
+
+class AlignmentResponse(BaseModel):
+    provider: str
+    duration_ms: int = Field(..., ge=0)
+    transcript: str
+    language: Optional[str] = None
+    expected_text: Optional[str] = None
+    expected_duration_ms: Optional[int] = Field(default=None, ge=0)
+    overrun_ms: Optional[int] = Field(default=None, ge=0)
+    words: list[AlignmentWord] = Field(default_factory=list)
+
+
 class VoiceInfo(BaseModel):
     id: str
     name: str

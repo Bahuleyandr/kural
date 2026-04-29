@@ -169,12 +169,19 @@ def local_model_inventory() -> list[LocalModelInfo]:
             name="IndicTrans2",
             category="translation",
             provider="indictrans2",
-            status="disabled" if _has_files(indic_dir) else "not_configured",
+            status="ready"
+            if transformers_installed and _has_files(indic_dir)
+            else "not_configured"
+            if transformers_installed
+            else "not_installed",
             languages=["English<->22 Indian languages"],
-            capabilities=["translate", "offline", "future-adapter"],
+            capabilities=["translate", "offline"],
             license="MIT",
             path=_path_text(indic_dir),
-            detail="Model-pack slot is reserved; inference adapter is not enabled in this build.",
+            detail=None
+            if transformers_installed and _has_files(indic_dir)
+            else "Install transformers + IndicTransToolkit and point INDICTRANS2_MODEL_DIR at "
+            "an ai4bharat/indictrans2-* checkpoint folder.",
         ),
         LocalModelInfo(
             id="nllb-200",

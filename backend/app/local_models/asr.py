@@ -23,6 +23,23 @@ class AsrResult:
     segments: list[AsrSegment]
 
 
+@dataclass(frozen=True)
+class AlignedWord:
+    text: str
+    start_ms: int
+    end_ms: int
+    probability: float | None
+
+
+@dataclass(frozen=True)
+class AlignmentResult:
+    provider: str
+    duration_ms: int
+    transcript: str
+    language: str | None
+    words: list[AlignedWord]
+
+
 _faster_whisper_model = None
 _vosk_model = None
 
@@ -203,6 +220,74 @@ def _transcribe_whisper_cpp(
         provider="whisper.cpp",
         language=lang,
         segments=[segment] if segment else [],
+    )
+
+
+def align_audio(
+    audio_bytes: bytes,
+    filename: str | None = None,
+    content_type: str | None = None,
+    language: str | None = None,
+) -> AlignmentResult:
+    """Transcribe with word-level timestamps via faster-whisper.
+
+    Used by the dubbing workspace to detect overruns and suggest retiming.
+    Requires the faster-whisper model bundle; raises LocalModelUnavailable
+    otherwise.
+    """
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise LocalModelUnavailable("faster-whisper is not installed.") from exc
+
+    model_dir = _expand(settings.faster_whisper_model_dir)
+    if not _has_files(model_dir):
+        raise LocalModelUnavailable(
+            "FASTER_WHISPER_MODEL_DIR must point at a local faster-whisper model folder."
+        )
+
+    global _faster_whisper_model
+    if _faster_whisper_model is None:
+        _faster_whisper_model = WhisperModel(str(model_dir), device="cpu", compute_type="int8")
+
+    temp_path = _write_temp_audio(audio_bytes, filename, content_type)
+    try:
+        raw_segments, info = _faster_whisper_model.transcribe(
+            str(temp_path),
+            language=_lang_code(language),
+            word_timestamps=True,
+        )
+        words: list[AlignedWord] = []
+        transcript_parts: list[str] = []
+        max_end = 0.0
+        for segment in raw_segments:
+            transcript_parts.append(segment.text.strip())
+            for word in getattr(segment, "words", None) or []:
+                start = max(0.0, float(word.start or 0.0))
+                end = max(start, float(word.end or start))
+                max_end = max(max_end, end)
+                words.append(
+                    AlignedWord(
+                        text=word.word.strip(),
+                        start_ms=int(start * 1000),
+                        end_ms=int(end * 1000),
+                        probability=getattr(word, "probability", None),
+                    )
+                )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    transcript = " ".join(part for part in transcript_parts if part).strip()
+    detected_language = getattr(info, "language", None) or _lang_code(language)
+    duration_ms = int(max_end * 1000)
+    if duration_ms == 0 and words:
+        duration_ms = words[-1].end_ms
+    return AlignmentResult(
+        provider="faster-whisper",
+        duration_ms=duration_ms,
+        transcript=transcript,
+        language=detected_language,
+        words=words,
     )
 
 
