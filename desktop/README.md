@@ -13,7 +13,30 @@ cd desktop/src-tauri
 cargo tauri dev
 ```
 
-## Production build
+## Local Installer Build
+
+Windows:
+
+```powershell
+cd desktop
+.\build-installer.ps1
+```
+
+Linux/macOS:
+
+```bash
+cd desktop
+./build-installer.sh
+```
+
+This provisions `desktop/runtime/python`, downloads Kokoro model files into
+`desktop/runtime/models/kokoro`, renders an unsigned installer config, builds
+the static frontend, and then runs the Tauri bundle build. On Windows it targets
+NSIS and MSI installers. Use `-WithLocalModels` / `--with-local-models` to also
+bundle the optional Faster-Whisper and Argos packs, and `-WithClone` /
+`--with-clone` to include the optional Chatterbox runtime.
+
+## Production Build
 
 ```bash
 cd desktop
@@ -28,7 +51,10 @@ Release signing and updater keys are intentionally disabled until the first sign
 python scripts/provision-backend-runtime.py --target runtime/python
 ```
 
-Add `--with-clone` to include Chatterbox dependencies in the bundled runtime. The desktop app discovers the bundled runtime at `resources/python/bin/python` on Linux/macOS or `resources/python/Scripts/python.exe` on Windows.
+Add `--with-clone` to include Chatterbox dependencies in the bundled runtime.
+Add `--with-local-models` to include ASR/translation adapter dependencies. The
+desktop app discovers the bundled runtime at `resources/python/bin/python` on
+Linux/macOS or `resources/python/Scripts/python.exe` on Windows.
 
 ## Signed Release Build
 

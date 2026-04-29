@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
+    env,
     net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
@@ -36,17 +37,22 @@ fn find_free_port() -> u16 {
 ///
 /// In development: set KURAL_BACKEND_DIR to the `backend/` directory.
 /// In a bundled release: the backend directory is expected next to the executable.
-fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Child> {
+fn start_backend(
+    port: u16,
+    resource_dir: Option<PathBuf>,
+    app_data_dir: Option<PathBuf>,
+) -> std::io::Result<Child> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     let resource_dir_for_python = resource_dir.clone();
+    let resource_dir_for_models = resource_dir.clone();
 
-    if let Ok(dir) = std::env::var("KURAL_BACKEND_DIR") {
+    if let Ok(dir) = env::var("KURAL_BACKEND_DIR") {
         candidates.push(PathBuf::from(dir));
     }
     if let Some(dir) = resource_dir {
         candidates.push(dir.join("backend"));
     }
-    if let Ok(exe) = std::env::current_exe() {
+    if let Ok(exe) = env::current_exe() {
         if let Some(parent) = exe.parent() {
             candidates.push(parent.join("backend"));
         }
@@ -65,7 +71,7 @@ fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Ch
             )
         })?;
 
-    let explicit_python = std::env::var("KURAL_PYTHON").ok();
+    let explicit_python = env::var("KURAL_PYTHON").ok();
     let mut python_candidates: Vec<String> = Vec::new();
     if let Some(dir) = resource_dir_for_python {
         python_candidates.push(
@@ -121,7 +127,8 @@ fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Ch
             })?
     };
 
-    Command::new(python)
+    let mut command = Command::new(python);
+    command
         .args([
             "-m",
             "uvicorn",
@@ -133,8 +140,46 @@ fn start_backend(port: u16, resource_dir: Option<PathBuf>) -> std::io::Result<Ch
         ])
         .current_dir(&backend_dir)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+
+    if let Some(dir) = resource_dir_for_models {
+        let kokoro_dir = dir.join("models").join("kokoro");
+        if kokoro_dir.join("kokoro-v1.0.int8.onnx").exists()
+            && kokoro_dir.join("voices-v1.0.bin").exists()
+        {
+            command.env("MODEL_CACHE_DIR", kokoro_dir);
+        }
+
+        let faster_whisper_dir = dir
+            .join("models")
+            .join("asr")
+            .join("faster-whisper-tiny");
+        if faster_whisper_dir.exists() {
+            command.env("FASTER_WHISPER_MODEL_DIR", faster_whisper_dir);
+        }
+
+        let argos_dir = dir
+            .join("models")
+            .join("translation")
+            .join("argos")
+            .join("packages");
+        if argos_dir.exists() {
+            command.env("ARGOS_PACKAGES_DIR", &argos_dir);
+            command.env("ARGOS_PACKAGE_DIR", argos_dir);
+        }
+    }
+
+    if let Some(dir) = app_data_dir {
+        let _ = std::fs::create_dir_all(&dir);
+        let clones_dir = dir.join("clones");
+        let hf_dir = dir.join("huggingface-cache");
+        let _ = std::fs::create_dir_all(&clones_dir);
+        let _ = std::fs::create_dir_all(&hf_dir);
+        command.env("CLONE_CACHE_DIR", clones_dir);
+        command.env("HF_HOME", hf_dir);
+    }
+
+    command.spawn()
 }
 
 fn wait_for_backend(port: u16, child: &mut Child, timeout: Duration) -> std::io::Result<()> {
@@ -249,8 +294,9 @@ fn main() {
         .setup(|app| {
             let port = find_free_port();
             let resource_dir = app.path().resource_dir().ok();
+            let app_data_dir = app.path().app_data_dir().ok();
 
-            let (child_opt, backend_error) = match start_backend(port, resource_dir) {
+            let (child_opt, backend_error) = match start_backend(port, resource_dir, app_data_dir) {
                 Ok(mut child) => match wait_for_backend(port, &mut child, Duration::from_secs(15)) {
                     Ok(()) => (Some(child), None),
                     Err(e) => {

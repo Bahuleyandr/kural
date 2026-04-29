@@ -1,4 +1,4 @@
-.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-runtime desktop-smoke desktop-release-check test
+.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check test
 
 backend-test:
 	cd backend && python -m pytest
@@ -35,6 +35,9 @@ docker-build:
 
 desktop-build:
 	cd desktop && ./build.sh
+
+desktop-installer:
+	cd desktop && ./build-installer.sh
 
 desktop-runtime:
 	cd desktop && python scripts/provision-backend-runtime.py --target runtime/python

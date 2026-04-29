@@ -26,31 +26,56 @@ def main() -> int:
         help="Target virtual environment directory bundled as the desktop Python runtime.",
     )
     parser.add_argument(
+        "--python",
+        default=sys.executable,
+        help="Python executable used to create the bundled virtual environment.",
+    )
+    parser.add_argument(
         "--with-clone",
         action="store_true",
         help="Install Chatterbox clone dependencies as well as the core backend.",
+    )
+    parser.add_argument(
+        "--with-local-models",
+        action="store_true",
+        help="Install optional local ASR/translation adapter dependencies.",
     )
     args = parser.parse_args()
 
     target = Path(args.target).resolve()
     backend_dir = repo_root / "backend"
     requirements = [backend_dir / "requirements.txt"]
+    if args.with_local_models:
+        requirements.append(backend_dir / "requirements-local-models.txt")
     if args.with_clone:
         requirements.append(backend_dir / "requirements-clone.txt")
 
     if not runtime_python(target).exists():
-        subprocess.run([sys.executable, "-m", "venv", str(target)], check=True)
+        subprocess.run([args.python, "-m", "venv", str(target)], check=True)
 
     python = runtime_python(target)
     subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
     for req in requirements:
         subprocess.run([str(python), "-m", "pip", "install", "-r", str(req)], check=True)
+    if args.with_clone:
+        subprocess.run(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--no-deps",
+                "chatterbox-tts==0.1.7",
+            ],
+            check=True,
+        )
 
     manifest = {
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "python": str(python),
         "requirements": [str(path.relative_to(repo_root)) for path in requirements],
         "with_clone": args.with_clone,
+        "with_local_models": args.with_local_models,
     }
     (target / "kural-runtime-manifest.json").write_text(
         json.dumps(manifest, indent=2),
