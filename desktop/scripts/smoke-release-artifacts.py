@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -61,6 +62,15 @@ def main() -> int:
             raise SystemExit(f"Invalid updater JSON {latest}: {exc}") from exc
         if "version" not in payload:
             raise SystemExit(f"Updater JSON is missing version: {latest}")
+
+    desktop_index = repo_root / "frontend" / "out" / "index.html"
+    if desktop_index.exists():
+        html = desktop_index.read_text(encoding="utf-8")
+        if re.search(r"""(?:href|src)=["']/_next/""", html):
+            raise SystemExit(
+                "Desktop frontend export uses absolute /_next asset URLs; "
+                "Tauri installers require relative ./_next URLs."
+            )
 
     print(f"Found {len(artifacts)} artifact(s) under {bundle_dir}")
     print(f"Found {len(signatures)} updater signature(s)")
