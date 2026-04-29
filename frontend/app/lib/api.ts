@@ -14,6 +14,35 @@ function getApiKey(): string {
   return injected || process.env.NEXT_PUBLIC_KURAL_API_KEY || "";
 }
 
+interface TauriGlobal {
+  invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+  core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
+}
+
+/**
+ * After a page reload Tauri's initialization_script does not re-run, so the
+ * window globals are gone. Call this once on mount to re-hydrate the API
+ * URL and API key from the Tauri command surface. No-op outside Tauri.
+ */
+export async function rehydrateTauriGlobals(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+  const invoke = tauri?.invoke ?? tauri?.core?.invoke;
+  if (!invoke) return;
+  try {
+    if (!getInjectedValue("__KURAL_API_URL__")) {
+      const url = (await invoke("get_backend_url")) as string;
+      (window as unknown as Record<string, unknown>).__KURAL_API_URL__ = url;
+    }
+    if (!getInjectedValue("__KURAL_API_KEY__")) {
+      const key = (await invoke("get_api_key")) as string;
+      (window as unknown as Record<string, unknown>).__KURAL_API_KEY__ = key;
+    }
+  } catch {
+    // Outside Tauri or command unavailable — fall back to env-based config.
+  }
+}
+
 export async function readApiError(res: Response): Promise<string> {
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {

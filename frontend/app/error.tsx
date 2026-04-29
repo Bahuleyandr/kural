@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 
+import { apiFetch, getApiUrl } from "./lib/api";
+
 export default function GlobalError({
   error,
   reset,
@@ -11,6 +13,19 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("Kural workspace error", error);
+    const url = `${getApiUrl()}/api/telemetry`;
+    void apiFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "frontend_render_error",
+        message: error.message,
+        digest: error.digest,
+        extra: { stack: error.stack ?? null },
+      }),
+    }).catch(() => {
+      // Telemetry is best-effort and opt-in server-side; never block recovery.
+    });
   }, [error]);
 
   return (

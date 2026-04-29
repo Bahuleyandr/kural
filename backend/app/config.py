@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # Append-only consent audit log location.
     consent_log_path: str = "~/.cache/kural/consent.log"
 
+    # Vendor-neutral, opt-in error reporting. Both must be set for any
+    # outbound network traffic to occur.
+    telemetry_opt_in: bool = False
+    telemetry_endpoint: str = ""
+
     # Kokoro model file locations (relative to model_cache_dir)
     model_cache_dir: str = "~/.cache/kural/kokoro"
     kokoro_model_file: str = "kokoro-v1.0.int8.onnx"

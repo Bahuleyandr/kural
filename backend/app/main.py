@@ -1,10 +1,16 @@
-from fastapi import Depends, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import logging
+import traceback
+from datetime import datetime, timezone
 
+from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from . import telemetry as telemetry_module
 from .auth import require_api_key
 from .config import settings
 from .rate_limit import limiter, rate_limit_exceeded_handler
-from .routers import clones, health, local_models, synthesize, voices
+from .routers import clones, health, local_models, setup, synthesize, telemetry, voices
 from slowapi.errors import RateLimitExceeded
 
 app = FastAPI(
@@ -17,6 +23,36 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+_log = logging.getLogger("kural.exception")
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    _log.exception("Unhandled error in %s %s", request.method, request.url.path)
+    if telemetry_module.is_enabled():
+        telemetry_module.record_event(
+            {
+                "kind": "backend_unhandled",
+                "message": str(exc),
+                "extra": {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "traceback": traceback.format_exc(limit=20),
+                },
+                "received_at": datetime.now(timezone.utc).isoformat(),
+                "source": "backend",
+            }
+        )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": {
+                "code": "internal_error",
+                "message": "Internal server error.",
+            }
+        },
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,3 +69,5 @@ app.include_router(voices.router, prefix="/api", dependencies=_protected)
 app.include_router(clones.router, prefix="/api", dependencies=_protected)
 app.include_router(synthesize.router, prefix="/api", dependencies=_protected)
 app.include_router(local_models.router, prefix="/api", dependencies=_protected)
+app.include_router(setup.router, prefix="/api", dependencies=_protected)
+app.include_router(telemetry.router, prefix="/api", dependencies=_protected)

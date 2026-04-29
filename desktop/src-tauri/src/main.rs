@@ -3,8 +3,10 @@
 
 use std::{
     env,
+    fs,
+    io::Write,
     net::{TcpListener, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
@@ -20,6 +22,80 @@ use tauri::{
 
 struct BackendProcess(Mutex<Option<Child>>);
 struct BackendPort(u16);
+struct BackendApiKey(String);
+
+// ── API key (per-install shared secret) ─────────────────────────────────────
+
+/// Ensure a per-install API key exists at `<app_data_dir>/api_key`. Generates
+/// a fresh 32-byte hex string on first launch. The same key is injected into
+/// the webview as `window.__KURAL_API_KEY__` and exported to the backend as
+/// `KURAL_API_KEY` so every /api/* request from the page carries it.
+///
+/// Localhost binding already keeps the API off the network, but a per-install
+/// key adds defense-in-depth against other local processes that find the
+/// ephemeral port.
+fn ensure_api_key(app_data_dir: &Path) -> std::io::Result<String> {
+    fs::create_dir_all(app_data_dir)?;
+    let key_path = app_data_dir.join("api_key");
+    if let Ok(existing) = fs::read_to_string(&key_path) {
+        let trimmed = existing.trim();
+        if trimmed.len() >= 32 {
+            return Ok(trimmed.to_string());
+        }
+    }
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::Other, format!("getrandom failed: {e}"))
+    })?;
+    let key: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    let mut file = fs::File::create(&key_path)?;
+    file.write_all(key.as_bytes())?;
+    Ok(key)
+}
+
+// ── First-run model provisioning ────────────────────────────────────────────
+
+/// If the bundled Kokoro model files are missing from `model_dir`, run the
+/// backend's `download_models.py` to fetch them. Returns Ok with no work done
+/// when models are already present. Errors propagate to the caller, which
+/// surfaces them via `__KURAL_BACKEND_ERROR__` so the frontend can show a
+/// setup banner instead of a blank "backend not reachable" message.
+fn ensure_kokoro_models(
+    backend_dir: &Path,
+    model_dir: &Path,
+    python: &str,
+) -> std::io::Result<()> {
+    let model_file = model_dir.join("kokoro-v1.0.int8.onnx");
+    let voices_file = model_dir.join("voices-v1.0.bin");
+    if model_file.exists() && voices_file.exists() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(model_dir)?;
+    let script = backend_dir.join("scripts").join("download_models.py");
+    if !script.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("download_models.py not found at {}", script.display()),
+        ));
+    }
+
+    let status = Command::new(python)
+        .arg(&script)
+        .current_dir(backend_dir)
+        .env("MODEL_CACHE_DIR", model_dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+
+    if !status.success() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("download_models.py exited with {status}"),
+        ));
+    }
+    Ok(())
+}
 
 // ── Backend lifecycle ───────────────────────────────────────────────────────
 
@@ -39,6 +115,7 @@ fn find_free_port() -> u16 {
 /// In a bundled release: the backend directory is expected next to the executable.
 fn start_backend(
     port: u16,
+    api_key: &str,
     resource_dir: Option<PathBuf>,
     app_data_dir: Option<PathBuf>,
 ) -> std::io::Result<Child> {
@@ -127,7 +204,19 @@ fn start_backend(
             })?
     };
 
-    let mut command = Command::new(python);
+    let kokoro_dir = if let Some(ref dir) = app_data_dir {
+        Some(dir.join("models").join("kokoro"))
+    } else {
+        None
+    };
+
+    if let Some(ref kokoro_dir) = kokoro_dir {
+        if let Err(err) = ensure_kokoro_models(&backend_dir, kokoro_dir, &python) {
+            eprintln!("kural: model provisioning failed: {err}");
+        }
+    }
+
+    let mut command = Command::new(&python);
     command
         .args([
             "-m",
@@ -139,15 +228,25 @@ fn start_backend(
             &port.to_string(),
         ])
         .current_dir(&backend_dir)
+        .env("KURAL_API_KEY", api_key)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    if let Some(dir) = resource_dir_for_models {
-        let kokoro_dir = dir.join("models").join("kokoro");
+    if let Some(ref kokoro_dir) = kokoro_dir {
         if kokoro_dir.join("kokoro-v1.0.int8.onnx").exists()
             && kokoro_dir.join("voices-v1.0.bin").exists()
         {
             command.env("MODEL_CACHE_DIR", kokoro_dir);
+        }
+    }
+
+    if let Some(dir) = resource_dir_for_models {
+        let bundled_kokoro = dir.join("models").join("kokoro");
+        if kokoro_dir.is_none()
+            && bundled_kokoro.join("kokoro-v1.0.int8.onnx").exists()
+            && bundled_kokoro.join("voices-v1.0.bin").exists()
+        {
+            command.env("MODEL_CACHE_DIR", bundled_kokoro);
         }
 
         let faster_whisper_dir = dir
@@ -232,6 +331,14 @@ fn get_backend_url(port: tauri::State<BackendPort>) -> String {
     format!("http://127.0.0.1:{}", port.0)
 }
 
+/// Returns the per-install API key. Survives page reloads — the
+/// initialization_script only runs on first load, so the frontend can call
+/// this command to re-hydrate `window.__KURAL_API_KEY__` if needed.
+#[tauri::command]
+fn get_api_key(key: tauri::State<BackendApiKey>) -> String {
+    key.0.clone()
+}
+
 // ── Menu ───────────────────────────────────────────────────────────────────
 
 fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
@@ -296,7 +403,18 @@ fn main() {
             let resource_dir = app.path().resource_dir().ok();
             let app_data_dir = app.path().app_data_dir().ok();
 
-            let (child_opt, backend_error) = match start_backend(port, resource_dir, app_data_dir) {
+            let api_key = app_data_dir
+                .as_deref()
+                .and_then(|dir| match ensure_api_key(dir) {
+                    Ok(key) => Some(key),
+                    Err(err) => {
+                        eprintln!("kural: failed to provision API key: {err}");
+                        None
+                    }
+                })
+                .unwrap_or_default();
+
+            let (child_opt, backend_error) = match start_backend(port, &api_key, resource_dir, app_data_dir) {
                 Ok(mut child) => match wait_for_backend(port, &mut child, Duration::from_secs(15)) {
                     Ok(()) => (Some(child), None),
                     Err(e) => {
@@ -313,6 +431,7 @@ fn main() {
             };
             app.manage(BackendProcess(Mutex::new(child_opt)));
             app.manage(BackendPort(port));
+            app.manage(BackendApiKey(api_key.clone()));
 
             // App menu (macOS menu bar; also used on Linux/Windows)
             let menu = build_menu(app.handle())?;
@@ -328,7 +447,8 @@ fn main() {
                 tauri::WebviewUrl::App("index.html".into()),
             )
             .initialization_script(&format!(
-                "window.__KURAL_API_URL__ = 'http://127.0.0.1:{port}'; window.__KURAL_BACKEND_ERROR__ = '{}';",
+                "window.__KURAL_API_URL__ = 'http://127.0.0.1:{port}'; window.__KURAL_API_KEY__ = '{}'; window.__KURAL_BACKEND_ERROR__ = '{}';",
+                escape_js_string(&api_key),
                 backend_error
                     .as_deref()
                     .map(escape_js_string)
@@ -350,7 +470,7 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_backend_url])
+        .invoke_handler(tauri::generate_handler![get_backend_url, get_api_key])
         .run(tauri::generate_context!())
         .expect("error while running kural");
 }
