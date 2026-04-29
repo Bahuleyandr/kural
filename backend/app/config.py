@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     telemetry_opt_in: bool = False
     telemetry_endpoint: str = ""
 
+    # Optional path to a JSON file describing extra Kokoro voice IDs the
+    # frontend should expose. Each entry follows the same shape as the
+    # built-in voices (id/name/language/locale/gender/description). The IDs
+    # must already be present in the installed voices_file; this config is
+    # only an alias / surfacing layer, not a model loader.
+    user_voices_file: str = ""
+
     # Kokoro model file locations (relative to model_cache_dir)
     model_cache_dir: str = "~/.cache/kural/kokoro"
     kokoro_model_file: str = "kokoro-v1.0.int8.onnx"

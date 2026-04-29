@@ -397,6 +397,24 @@ export default function Home() {
     return { blob, format: isMp3 ? "mp3" : activeControls.format };
   }
 
+  function playProgressiveChunk(chunkBlob: Blob, queue: { audio: HTMLAudioElement | null }) {
+    const url = URL.createObjectURL(chunkBlob);
+    const playNext = () => {
+      const audio = new Audio(url);
+      queue.audio = audio;
+      audio.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true });
+      void audio.play().catch(() => {
+        // Autoplay can be blocked on fresh tabs; downloading still works.
+        URL.revokeObjectURL(url);
+      });
+    };
+    if (queue.audio && !queue.audio.ended) {
+      queue.audio.addEventListener("ended", playNext, { once: true });
+    } else {
+      playNext();
+    }
+  }
+
   async function generateAudio() {
     if (!activeProject || !activeDocument) return;
     const rawText = activeDocument.text.trim();
@@ -412,15 +430,23 @@ export default function Home() {
       const mode = activeDocument.mode === "batch" ? "batch" : "single";
       const items = mode === "batch" ? splitBatchInput(rawText) : [rawText];
       const newAssets: AudioAsset[] = [];
+      const playbackQueue: { audio: HTMLAudioElement | null } = { audio: null };
 
       for (const item of items) {
         const chunks =
           !ssmlEnabled && controls.format === "wav" && item.length > SYNTH_CHUNK_LIMIT
             ? splitLongText(item)
             : [item];
-        const generated = [];
+        const generated: Array<{ blob: Blob; format: OutputFormat }> = [];
         for (const chunk of chunks) {
-          generated.push(await synthesizeText(chunk));
+          const part = await synthesizeText(chunk);
+          generated.push(part);
+          // Progressive playback: start playing the first chunk while later
+          // chunks are still synthesizing. WAV-only because MP3 chunks would
+          // need decoding before playback.
+          if (chunks.length > 1 && part.format === "wav") {
+            playProgressiveChunk(part.blob, playbackQueue);
+          }
         }
         const blob =
           generated.length > 1

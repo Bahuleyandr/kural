@@ -1,5 +1,7 @@
 """TTS engine — wraps kokoro-onnx (lightweight, no torch required)."""
 import io
+import json
+import logging
 import os
 from pathlib import Path
 from typing import AsyncGenerator
@@ -9,6 +11,8 @@ import soundfile as sf
 
 from ..config import settings
 from .registry import registry
+
+_log = logging.getLogger(__name__)
 
 KOKORO_VOICES = [
     {
@@ -193,8 +197,63 @@ def _lang_for_voice(voice: str) -> str:
     return "en-gb" if voice.startswith("b") else "en-us"
 
 
+_USER_VOICE_REQUIRED_KEYS = {"id", "name", "language", "gender", "description"}
+
+
+def _load_user_voices() -> list[dict]:
+    """Read KURAL_USER_VOICES_FILE and return validated extra voice descriptors.
+
+    Validation is intentionally lenient — bad entries are skipped with a log
+    line so a malformed user file never breaks the running engine.
+    """
+    raw_path = settings.user_voices_file.strip()
+    if not raw_path:
+        return []
+    path = Path(os.path.expanduser(raw_path))
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _log.warning("Failed to parse user voices file %s: %s", path, exc)
+        return []
+    if not isinstance(data, list):
+        _log.warning("User voices file %s must contain a JSON list", path)
+        return []
+
+    builtin_ids = {voice["id"] for voice in KOKORO_VOICES}
+    extra: list[dict] = []
+    seen: set[str] = set()
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        missing = _USER_VOICE_REQUIRED_KEYS - entry.keys()
+        if missing:
+            _log.warning("User voice entry missing keys %s: %s", missing, entry)
+            continue
+        voice_id = str(entry["id"])
+        if voice_id in builtin_ids or voice_id in seen:
+            continue
+        seen.add(voice_id)
+        extra.append(
+            {
+                "id": voice_id,
+                "name": str(entry["name"]),
+                "language": str(entry["language"]),
+                "locale": str(entry.get("locale") or entry["language"]),
+                "engine": str(entry.get("engine") or "kokoro"),
+                "capabilities": list(
+                    entry.get("capabilities") or ["tts", "ssml", "wav", "mp3", "advanced-controls"]
+                ),
+                "gender": str(entry["gender"]),
+                "description": str(entry["description"]),
+            }
+        )
+    return extra
+
+
 def get_voices() -> list[dict]:
-    return KOKORO_VOICES
+    return KOKORO_VOICES + _load_user_voices()
 
 
 def _ndarray_to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
