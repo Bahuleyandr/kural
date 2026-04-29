@@ -2,10 +2,12 @@ import asyncio
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
+from ..config import settings
 from ..models import SynthesizeRequest
+from ..rate_limit import limiter
 from ..tts.audio import process_wav_audio
 from ..tts.pronunciation import apply_pronunciation_rules
 from ..tts.ssml import BreakSegment, TextSegment, parse_ssml, stitch_wav_sequence
@@ -13,6 +15,7 @@ from ..tts.engine import synthesize, synthesize_stream
 
 router = APIRouter(tags=["synthesis"])
 _executor = ThreadPoolExecutor(max_workers=2)
+_FFMPEG_TIMEOUT_S = 60
 
 
 def _error(code: str, message: str) -> dict[str, str]:
@@ -39,9 +42,12 @@ def _wav_to_mp3(audio_bytes: bytes) -> bytes:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=True,
+            timeout=_FFMPEG_TIMEOUT_S,
         )
     except FileNotFoundError as exc:
         raise RuntimeError("MP3 export requires ffmpeg on the backend host.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"MP3 export timed out after {_FFMPEG_TIMEOUT_S}s.") from exc
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"MP3 export failed: {detail}") from exc
@@ -88,9 +94,10 @@ def _synthesize_ssml(req: SynthesizeRequest) -> bytes:
 
 
 @router.post("/synthesize")
-async def synthesize_audio(req: SynthesizeRequest) -> Response:
+@limiter.limit(lambda: settings.rate_limit_synthesize)
+async def synthesize_audio(request: Request, req: SynthesizeRequest) -> Response:
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         if req.voice_id:
             # Cloned-voice path via Chatterbox
@@ -146,7 +153,9 @@ async def synthesize_audio(req: SynthesizeRequest) -> Response:
 
 
 @router.get("/synthesize/stream")
+@limiter.limit(lambda: settings.rate_limit_synthesize)
 async def synthesize_stream_audio(
+    request: Request,
     text: str = Query(..., min_length=1, max_length=10000),
     voice: str = Query(default="af_bella"),
     speed: float = Query(default=1.0, ge=0.5, le=2.0),

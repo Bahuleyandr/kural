@@ -9,7 +9,7 @@
     "build:desktop": "cross-env NEXT_DESKTOP=1 next build",
     "start": "next start",
     "lint": "next lint",
-    "test:unit": "vitest run tests/dubbing.test.ts tests/workspace.test.ts",
+    "test:unit": "vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {

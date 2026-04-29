@@ -8,6 +8,7 @@ import numpy as np
 import soundfile as sf
 
 from ..config import settings
+from .registry import registry
 
 KOKORO_VOICES = [
     {
@@ -122,9 +123,6 @@ KOKORO_VOICES = [
     },
 ]
 
-_kokoro_instance = None
-
-
 def _model_dir() -> Path:
     d = Path(os.path.expanduser(settings.model_cache_dir))
     d.mkdir(parents=True, exist_ok=True)
@@ -166,11 +164,7 @@ def _espeak_config():
         return None
 
 
-def _get_kokoro():
-    global _kokoro_instance
-    if _kokoro_instance is not None:
-        return _kokoro_instance
-
+def _build_kokoro():
     try:
         from kokoro_onnx import Kokoro
     except ImportError as exc:
@@ -188,10 +182,11 @@ def _get_kokoro():
             "Run: python scripts/download_models.py"
         )
 
-    _kokoro_instance = Kokoro(
-        str(model_path), str(voices_path), espeak_config=_espeak_config()
-    )
-    return _kokoro_instance
+    return Kokoro(str(model_path), str(voices_path), espeak_config=_espeak_config())
+
+
+def _get_kokoro():
+    return registry.kokoro(_build_kokoro)
 
 
 def _lang_for_voice(voice: str) -> str:
