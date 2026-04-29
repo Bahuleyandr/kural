@@ -1,85 +1,144 @@
 # Kural Release Checklist
 
+## TL;DR
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` builds Linux/Windows/macOS bundles, signs them
+when the corresponding secrets are configured, runs the artifact smoke check,
+and uploads everything to the GitHub release. Without signing secrets the
+workflow still produces the bundles — they're just unsigned (and on macOS,
+also un-notarized, which means Gatekeeper will block them).
+
 ## Unsigned Local Installers
 
-Use this path for internal testing and demos before code-signing accounts are
-ready.
-
-Windows:
+For internal testing and demos, build straight from the repo:
 
 ```powershell
 cd desktop
 .\build-installer.ps1
 ```
 
-Linux/macOS:
-
 ```bash
 cd desktop
 ./build-installer.sh
 ```
 
-The installer scripts provision a bundled Python backend runtime, download the
-Kokoro ONNX model files into `desktop/runtime/models/kokoro`, render
-`desktop/target/tauri-installer.conf.json`, build the static frontend, build the
-Tauri installer, and smoke-check the generated artifacts.
+Both wrappers shell out to `desktop/scripts/build_desktop.py installer`. The
+script provisions a bundled Python backend runtime, downloads the Kokoro ONNX
+weights into `desktop/runtime/models/kokoro`, renders the installer config,
+builds the static frontend, builds the Tauri installer, and runs
+`smoke-release-artifacts.py` against the output.
 
-Optional switches:
+Optional flags forwarded straight through to `build_desktop.py`:
 
-- `-WithClone` / `--with-clone`: include Chatterbox voice-clone runtime.
-- `-WithLocalModels` / `--with-local-models`: include Faster-Whisper and Argos
-  packs from `KURAL_LOCAL_MODELS_ROOT`.
-- `-SkipRuntimeProvision` / `--skip-runtime-provision`: reuse an existing
-  `desktop/runtime/python`.
-- `-SkipModelProvision` / `--skip-model-provision`: reuse existing bundled
-  Kokoro model files.
+- `--with-clone` — bundle Chatterbox voice-clone runtime
+- `--with-local-models` — bundle Faster-Whisper + Argos packs from
+  `KURAL_LOCAL_MODELS_ROOT` (or provision new ones)
+- `--skip-runtime-provision` — reuse `desktop/runtime/python`
+- `--skip-model-provision` — reuse the bundled Kokoro weights
 
-Unsigned Windows installers may still show SmartScreen warnings until we add
-Authenticode signing.
+Unsigned Windows installers will trigger SmartScreen warnings; macOS
+unsigned bundles will be Gatekeeper-blocked. Sign them.
 
-## Desktop Runtime
+## Updater Signing
 
-Provision a bundled backend runtime before signed desktop builds:
+Tauri's auto-updater uses a separate Ed25519 keypair from OS code-signing.
 
-```bash
-cd desktop
-python scripts/provision-backend-runtime.py --target runtime/python
-```
+1. `cargo install tauri-cli` once, then `cargo tauri signer generate -w
+   ~/.kural/tauri.key`. Save the private key somewhere safe and the
+   `pubkey:...` line as `KURAL_UPDATER_PUBLIC_KEY`.
+2. Set GitHub secrets:
+   - `KURAL_UPDATER_PUBLIC_KEY` — the public half (pasted into the config)
+   - `TAURI_SIGNING_PRIVATE_KEY` — contents of the private key file
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — optional, only if the key is
+     password-encrypted
 
-Use `--with-clone` when release artifacts should include Chatterbox voice-clone dependencies. The Tauri app discovers this runtime from the bundled `python/` resource, with `KURAL_PYTHON` still available as an override for diagnostics.
+The release workflow refuses to run without these.
 
-## Signing And Updater
+## Windows Authenticode Signing
 
-Tauri v2 updater artifacts require:
+Windows blocks unsigned installers behind SmartScreen. Two paths:
 
-- `KURAL_UPDATER_PUBLIC_KEY`: public key written into the temporary Tauri config.
-- `TAURI_SIGNING_PRIVATE_KEY`: private signing key path or contents used only during build.
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: optional private-key password.
-- `KURAL_UPDATE_ENDPOINT`: optional updater JSON endpoint. Defaults to the GitHub latest release `latest.json`.
+**Standard certificate (Sectigo / DigiCert / GlobalSign):** ~$100/yr,
+hosted on a smartcard or CSP. Less effective against SmartScreen.
 
-The release scripts render `desktop/target/tauri-release.conf.json` with `bundle.createUpdaterArtifacts=true`, bundle `desktop/runtime/python`, build installers, and verify artifacts:
+**EV certificate:** ~$300/yr, instantly trusted by SmartScreen, hardware token
+required.
 
-```powershell
-cd desktop
-.\build-release.ps1
-```
+Either way, configure these GitHub secrets:
 
-```bash
-cd desktop
-./build-release.sh
-```
+- `KURAL_WIN_CERT_FILE` — base64-encoded `.pfx` (`base64 -w0 cert.pfx`).
+  Used to import the cert into the runner's Cert store at job start.
+- `KURAL_WIN_CERT_PASSWORD` — `.pfx` password.
+- `KURAL_WIN_CERT_THUMBPRINT` — thumbprint that `signtool` and Tauri pick up
+  from the imported cert.
+
+The release workflow imports the cert into `Cert:\CurrentUser\My`, hands the
+thumbprint to `render-release-config.py`, and Tauri invokes signtool with the
+configured timestamp URL.
+
+## macOS Developer ID Signing + Notarization
+
+Required so Gatekeeper does not block the app on first launch.
+
+1. Apple Developer Program membership ($99/yr).
+2. Generate a "Developer ID Application" certificate from Xcode → Preferences
+   → Accounts → Manage Certificates. Export as `.p12` with a password.
+3. Generate an app-specific password at appleid.apple.com → Sign-In and
+   Security → App-Specific Passwords (for `notarytool` submission).
+
+GitHub secrets:
+
+- `KURAL_MAC_SIGNING_IDENTITY` — exact identity string, e.g.
+  `Developer ID Application: Bahuleyan S (TEAMID)`
+- `KURAL_MAC_CERT_BASE64` — base64-encoded `.p12`
+- `KURAL_MAC_CERT_PASSWORD` — `.p12` password
+- `KURAL_MAC_KEYCHAIN_PASSWORD` — any string; used as the password for the
+  ephemeral keychain the workflow creates
+- `KURAL_APPLE_ID` — Apple ID email
+- `KURAL_APPLE_TEAM_ID` — Team ID (10-char string from Apple Developer)
+- `KURAL_APPLE_APP_PASSWORD` — app-specific password from the previous step
+
+The workflow imports the cert into a temporary keychain, signs via Tauri's
+`signingIdentity` config, then runs `xcrun notarytool submit … --wait` and
+staples the resulting ticket.
 
 ## Artifact Smoke
 
-After a build, run:
+Always runs as the last step of any release build:
 
 ```bash
 cd desktop
 python scripts/smoke-release-artifacts.py --require-signatures
 ```
 
-This checks that bundle artifacts exist, are non-empty, updater signatures are present, and any generated `latest.json` files are valid JSON with a version.
+Verifies bundle existence, non-empty size, presence of updater `.sig` files,
+and parses any `latest.json` to ensure it has a version field.
 
-## External Signing Accounts
+## Release Tagging
 
-Updater signatures are not the same as platform store or OS trust signing. Windows Authenticode, Apple Developer ID signing, notarization, and store submission still need the relevant private certificates/accounts outside this repository.
+```bash
+# Bump app version everywhere it appears:
+#   backend/app/version.py, backend/pyproject.toml, frontend/package.json,
+#   cli/pyproject.toml, desktop/src-tauri/Cargo.toml
+git commit -am "chore: bump to v0.2.1"
+git tag v0.2.1
+git push origin main v0.2.1
+```
+
+The release workflow triggers on `v*.*.*` tags. Track its run via
+`gh run watch`.
+
+## Known Gaps Until First Real Release
+
+- Updater key not yet generated (no `KURAL_UPDATER_PUBLIC_KEY` saved).
+- Windows EV cert not yet purchased.
+- Apple Developer Program not yet enrolled.
+- GitHub Actions billing on this account is currently blocked, so the
+  workflow above will not actually execute until that is resolved. Local
+  release builds (`build-release.{sh,ps1}`) work today; they just produce
+  unsigned bundles.

@@ -1,0 +1,165 @@
+name: Release
+
+# Triggered by tag pushes (v0.2.0, v0.2.1, ...). Builds Tauri installers on
+# every supported OS, signs them when the corresponding secret pair is set,
+# uploads bundles + updater artifacts to the GitHub release.
+#
+# Required secrets:
+#   KURAL_UPDATER_PUBLIC_KEY        - Tauri updater pubkey (always required)
+#   TAURI_SIGNING_PRIVATE_KEY       - Tauri updater private key (always required)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD - optional
+#
+# Optional Windows Authenticode signing (skipped if absent):
+#   KURAL_WIN_CERT_THUMBPRINT       - thumbprint of an installed cert, OR
+#   KURAL_WIN_CERT_FILE             - base64-encoded .pfx cert
+#   KURAL_WIN_CERT_PASSWORD         - password for the .pfx
+#
+# Optional macOS Developer ID signing + notarization (skipped if absent):
+#   KURAL_MAC_SIGNING_IDENTITY      - "Developer ID Application: <Team> (XXXX)"
+#   KURAL_MAC_CERT_BASE64           - base64-encoded .p12 cert imported into the keychain
+#   KURAL_MAC_CERT_PASSWORD         - password for the .p12
+#   KURAL_MAC_KEYCHAIN_PASSWORD     - ephemeral keychain password
+#   KURAL_APPLE_ID                  - Apple ID for notarytool
+#   KURAL_APPLE_TEAM_ID             - Team ID for notarytool
+#   KURAL_APPLE_APP_PASSWORD        - app-specific password for notarytool
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build deps
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libssl-dev build-essential libsndfile1 ffmpeg espeak-ng
+
+      - name: Import Windows signing cert
+        if: matrix.target == 'windows' && env.KURAL_WIN_CERT_FILE != ''
+        env:
+          KURAL_WIN_CERT_FILE: ${{ secrets.KURAL_WIN_CERT_FILE }}
+          KURAL_WIN_CERT_PASSWORD: ${{ secrets.KURAL_WIN_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String($env:KURAL_WIN_CERT_FILE)
+          [System.IO.File]::WriteAllBytes("$env:RUNNER_TEMP\kural.pfx", $bytes)
+          $secure = ConvertTo-SecureString -String $env:KURAL_WIN_CERT_PASSWORD -Force -AsPlainText
+          Import-PfxCertificate -FilePath "$env:RUNNER_TEMP\kural.pfx" -CertStoreLocation Cert:\CurrentUser\My -Password $secure | Out-Null
+          Remove-Item "$env:RUNNER_TEMP\kural.pfx"
+
+      - name: Import macOS signing cert
+        if: matrix.target == 'macos' && env.KURAL_MAC_CERT_BASE64 != ''
+        env:
+          KURAL_MAC_CERT_BASE64: ${{ secrets.KURAL_MAC_CERT_BASE64 }}
+          KURAL_MAC_CERT_PASSWORD: ${{ secrets.KURAL_MAC_CERT_PASSWORD }}
+          KURAL_MAC_KEYCHAIN_PASSWORD: ${{ secrets.KURAL_MAC_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/kural-build.keychain-db"
+          security create-keychain -p "$KURAL_MAC_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KURAL_MAC_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$KURAL_MAC_CERT_BASE64" | base64 --decode > "$RUNNER_TEMP/kural.p12"
+          security import "$RUNNER_TEMP/kural.p12" -P "$KURAL_MAC_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN" $(security list-keychain -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KURAL_MAC_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/kural.p12"
+
+      - name: Build release bundle
+        env:
+          KURAL_UPDATER_PUBLIC_KEY: ${{ secrets.KURAL_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          KURAL_WIN_CERT_THUMBPRINT: ${{ secrets.KURAL_WIN_CERT_THUMBPRINT }}
+          KURAL_MAC_SIGNING_IDENTITY: ${{ secrets.KURAL_MAC_SIGNING_IDENTITY }}
+        shell: bash
+        run: python desktop/scripts/build_desktop.py release --skip-smoke
+
+      - name: Notarize macOS bundle
+        if: matrix.target == 'macos' && env.KURAL_APPLE_ID != ''
+        env:
+          KURAL_APPLE_ID: ${{ secrets.KURAL_APPLE_ID }}
+          KURAL_APPLE_TEAM_ID: ${{ secrets.KURAL_APPLE_TEAM_ID }}
+          KURAL_APPLE_APP_PASSWORD: ${{ secrets.KURAL_APPLE_APP_PASSWORD }}
+        run: |
+          shopt -s nullglob
+          for bundle in desktop/src-tauri/target/release/bundle/{dmg,macos}/*.{dmg,app.zip}; do
+            [ -e "$bundle" ] || continue
+            xcrun notarytool submit "$bundle" \
+              --apple-id "$KURAL_APPLE_ID" \
+              --team-id "$KURAL_APPLE_TEAM_ID" \
+              --password "$KURAL_APPLE_APP_PASSWORD" \
+              --wait
+            xcrun stapler staple "$bundle"
+          done
+
+      - name: Smoke check artifacts
+        run: python desktop/scripts/smoke-release-artifacts.py --require-signatures
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kural-${{ matrix.target }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.AppImage
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.rpm
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.app.zip
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.exe
+            desktop/src-tauri/target/release/bundle/**/*.sig
+            desktop/src-tauri/target/release/bundle/**/latest.json
+          if-no-files-found: warn
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false

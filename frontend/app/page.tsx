@@ -6,7 +6,8 @@ import { AudioLibrary } from "./components/AudioLibrary";
 import { ClonePanel } from "./components/ClonePanel";
 import { ControlPanel } from "./components/ControlPanel";
 import { LocalModelPanel } from "./components/LocalModelPanel";
-import { apiFetch, getApiUrl, readApiError } from "./lib/api";
+import { SetupBanner } from "./components/SetupBanner";
+import { apiFetch, getApiUrl, readApiError, rehydrateTauriGlobals } from "./lib/api";
 import {
   SYNTH_CHUNK_LIMIT,
   applyPronunciationPreview,
@@ -52,7 +53,11 @@ import {
 } from "./lib/workspace";
 
 export default function Home() {
-  const apiUrl = useMemo(getApiUrl, []);
+  const [tauriReady, setTauriReady] = useState(false);
+  const apiUrl = useMemo(() => {
+    void tauriReady;
+    return getApiUrl();
+  }, [tauriReady]);
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
   const [clones, setClones] = useState<ClonedVoiceInfo[]>([]);
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
@@ -184,6 +189,16 @@ export default function Home() {
     const data = await res.json();
     setClones(data.clones ?? []);
   }, [apiUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void rehydrateTauriGlobals().finally(() => {
+      if (!cancelled) setTauriReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void refreshWorkspace();
@@ -951,6 +966,7 @@ export default function Home() {
         </aside>
 
         <section id="workspace" className="min-w-0 flex-1" aria-label="Workspace">
+          <SetupBanner apiUrl={apiUrl} />
           <div className="rounded border border-slate-300 bg-white">
             <div className="flex flex-col gap-3 border-b border-slate-200 p-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="grid gap-2 md:grid-cols-[minmax(0,2fr)_1fr_1fr]">
