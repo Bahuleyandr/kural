@@ -34,6 +34,25 @@ docker compose up
 
 Opens the web UI at http://localhost:3000. The backend API runs at http://localhost:8000.
 
+### Desktop installer
+
+Internal unsigned installers can be built from the repo:
+
+```powershell
+cd desktop
+.\build-installer.ps1
+```
+
+On Linux/macOS:
+
+```bash
+cd desktop
+./build-installer.sh
+```
+
+Signed public installers are a release step once Windows/macOS signing
+certificates are available.
+
 ### Local development
 
 **One-command local runtime:**
