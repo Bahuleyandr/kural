@@ -1,3 +1,6 @@
+// @vitest-environment node
+// jsdom's Blob shim is missing arrayBuffer/stream; we need Node's native Blob
+// for jszip + workspace export logic to roundtrip correctly.
 import "fake-indexeddb/auto";
 
 import { beforeEach, describe, expect, test } from "vitest";
