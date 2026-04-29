@@ -6,6 +6,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # KURAL_FLAVOUR=lite (~600 MB, Kokoro only) | clone (~2 GB, +Chatterbox)
+        KURAL_FLAVOUR: ${KURAL_FLAVOUR:-lite}
     # Bind to the loopback interface only. Override with KURAL_BIND=0.0.0.0
     # (and set KURAL_API_KEY) to expose on a LAN.
     ports:

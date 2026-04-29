@@ -132,8 +132,22 @@ jobs:
       - name: Download Kokoro models
         working-directory: backend
         run: python scripts/download_models.py
-      - name: Run integration tests
+      - name: Run Kokoro integration test
         working-directory: backend
         env:
           KURAL_RUN_INTEGRATION: "1"
         run: pytest tests/test_engine_integration.py -v
+
+      - name: Install Chatterbox runtime
+        working-directory: backend
+        run: |
+          pip install torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-clone.txt
+          pip install --no-deps chatterbox-tts==0.1.7
+
+      - name: Run Chatterbox integration test
+        working-directory: backend
+        env:
+          KURAL_RUN_INTEGRATION: "1"
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: pytest tests/test_clone_engine_integration.py -v

@@ -125,6 +125,163 @@ KOKORO_VOICES = [
         "gender": "male",
         "description": "British English — crisp and direct",
     },
+    # Japanese voices
+    {
+        "id": "jf_alpha",
+        "name": "Alpha",
+        "language": "ja-JP",
+        "locale": "ja-JP",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Japanese — bright and articulate",
+    },
+    {
+        "id": "jf_gongitsune",
+        "name": "Gongitsune",
+        "language": "ja-JP",
+        "locale": "ja-JP",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Japanese — warm narrative voice",
+    },
+    {
+        "id": "jm_kumo",
+        "name": "Kumo",
+        "language": "ja-JP",
+        "locale": "ja-JP",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "male",
+        "description": "Japanese — calm and measured",
+    },
+    # Mandarin Chinese voices
+    {
+        "id": "zf_xiaobei",
+        "name": "Xiaobei",
+        "language": "zh-CN",
+        "locale": "zh-CN",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Mandarin — clear and standard Putonghua",
+    },
+    {
+        "id": "zf_xiaoxiao",
+        "name": "Xiaoxiao",
+        "language": "zh-CN",
+        "locale": "zh-CN",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Mandarin — friendly and conversational",
+    },
+    {
+        "id": "zm_yunjian",
+        "name": "Yunjian",
+        "language": "zh-CN",
+        "locale": "zh-CN",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "male",
+        "description": "Mandarin — authoritative news read",
+    },
+    # Italian voices
+    {
+        "id": "if_sara",
+        "name": "Sara",
+        "language": "it-IT",
+        "locale": "it-IT",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Italian — bright and precise",
+    },
+    {
+        "id": "im_nicola",
+        "name": "Nicola",
+        "language": "it-IT",
+        "locale": "it-IT",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "male",
+        "description": "Italian — confident and grounded",
+    },
+    # French voices
+    {
+        "id": "ff_siwis",
+        "name": "Siwis",
+        "language": "fr-FR",
+        "locale": "fr-FR",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "French — articulate and refined",
+    },
+    # Spanish voices
+    {
+        "id": "ef_dora",
+        "name": "Dora",
+        "language": "es-ES",
+        "locale": "es-ES",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Spanish — warm and natural",
+    },
+    {
+        "id": "em_alex",
+        "name": "Alex",
+        "language": "es-ES",
+        "locale": "es-ES",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "male",
+        "description": "Spanish — clear and direct",
+    },
+    # Hindi voices
+    {
+        "id": "hf_alpha",
+        "name": "Alpha",
+        "language": "hi-IN",
+        "locale": "hi-IN",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Hindi — crisp and conversational",
+    },
+    {
+        "id": "hm_omega",
+        "name": "Omega",
+        "language": "hi-IN",
+        "locale": "hi-IN",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "male",
+        "description": "Hindi — measured and grounded",
+    },
+    # Portuguese voices
+    {
+        "id": "pf_dora",
+        "name": "Dora",
+        "language": "pt-BR",
+        "locale": "pt-BR",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "female",
+        "description": "Brazilian Portuguese — warm and lively",
+    },
+    {
+        "id": "pm_alex",
+        "name": "Alex",
+        "language": "pt-BR",
+        "locale": "pt-BR",
+        "engine": "kokoro",
+        "capabilities": ["tts", "ssml", "mp3", "wav", "advanced-controls"],
+        "gender": "male",
+        "description": "Brazilian Portuguese — confident and clear",
+    },
 ]
 
 def _model_dir() -> Path:
@@ -193,8 +350,29 @@ def _get_kokoro():
     return registry.kokoro(_build_kokoro)
 
 
+_VOICE_PREFIX_LANG = {
+    "a": "en-us",
+    "b": "en-gb",
+    "j": "ja",
+    "z": "cmn",
+    "i": "it",
+    "f": "fr-fr",
+    "e": "es",
+    "h": "hi",
+    "p": "pt-br",
+}
+
+
 def _lang_for_voice(voice: str) -> str:
-    return "en-gb" if voice.startswith("b") else "en-us"
+    """Map a Kokoro voice ID prefix to the language tag espeak / kokoro expects.
+
+    Voice IDs follow a convention: `{lang}{gender}_<name>`. Defaults to
+    American English when the prefix is unknown so synthesis still works.
+    """
+    if not voice:
+        return "en-us"
+    prefix = voice[0].lower()
+    return _VOICE_PREFIX_LANG.get(prefix, "en-us")
 
 
 _USER_VOICE_REQUIRED_KEYS = {"id", "name", "language", "gender", "description"}

@@ -7,6 +7,8 @@ import { ClonePanel } from "./components/ClonePanel";
 import { ControlPanel } from "./components/ControlPanel";
 import { LocalModelPanel } from "./components/LocalModelPanel";
 import { SetupBanner } from "./components/SetupBanner";
+import { useBackendStatus } from "./hooks/useBackendStatus";
+import { useWorkspace } from "./hooks/useWorkspace";
 import { apiFetch, getApiUrl, readApiError, rehydrateTauriGlobals } from "./lib/api";
 import {
   SYNTH_CHUNK_LIMIT,
@@ -21,27 +23,18 @@ import {
 } from "./lib/clientUtils";
 import { formatTime, parseTranscript } from "./lib/dubbing";
 import type {
-  ClonedVoiceInfo,
-  LocalModelInfo,
   Mode,
   TranscriptionResponse,
-  VoiceInfo,
   WorkspaceView,
 } from "./lib/types";
 import { stitchWavBlobs } from "./lib/wav";
 import {
   DEFAULT_CONTROLS,
   createId,
-  createProject,
   deleteAudioAsset,
-  deleteProject,
   exportProjectArchive,
   importProjectArchive,
-  loadAudioAssets,
-  loadWorkspace,
   saveAudioAsset,
-  saveProject,
-  setActiveProject as storeActiveProject,
   type AudioAsset,
   type AudioControls,
   type DubbingSegment,
@@ -55,21 +48,37 @@ import {
 export default function Home() {
   const [tauriReady, setTauriReady] = useState(false);
   const apiUrl = useMemo(() => {
+    // tauriReady is in the dep array on purpose — once Tauri rehydrates the
+    // window globals we want a fresh getApiUrl() read.
     void tauriReady;
     return getApiUrl();
   }, [tauriReady]);
-  const [voices, setVoices] = useState<VoiceInfo[]>([]);
-  const [clones, setClones] = useState<ClonedVoiceInfo[]>([]);
-  const [backendStatus, setBackendStatus] = useState<string | null>(null);
-  const [backendError, setBackendError] = useState("");
-  const [voicesError, setVoicesError] = useState<string | null>(null);
-  const [localModels, setLocalModels] = useState<LocalModelInfo[]>([]);
-  const [localModelError, setLocalModelError] = useState<string | null>(null);
 
-  const [projects, setProjects] = useState<KuralProject[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState("");
-  const [assets, setAssets] = useState<AudioAsset[]>([]);
-  const [workspaceError, setWorkspaceError] = useState("");
+  const {
+    voices,
+    clones,
+    localModels,
+    backendStatus,
+    backendError,
+    voicesError,
+    localModelError,
+    refreshClones,
+  } = useBackendStatus(apiUrl);
+
+  const {
+    projects,
+    activeProjectId,
+    assets,
+    workspaceError,
+    setAssets,
+    setWorkspaceError,
+    refreshWorkspace,
+    persistProject,
+    createNewProject,
+    removeActiveProject,
+    switchProject,
+  } = useWorkspace();
+
   const [activeView, setActiveView] = useState<WorkspaceView>("write");
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
   const [assetDurations, setAssetDurations] = useState<Record<string, number>>({});
@@ -163,33 +172,6 @@ export default function Home() {
     [clones, voiceOptions, voices]
   );
 
-  const refreshWorkspace = useCallback(async () => {
-    try {
-      const workspace = await loadWorkspace();
-      setProjects(workspace.projects);
-      setActiveProjectId(workspace.activeProjectId);
-      setAssets(workspace.assets);
-      setWorkspaceError("");
-    } catch (exc) {
-      setWorkspaceError(exc instanceof Error ? exc.message : "Could not load workspace");
-    }
-  }, []);
-
-  const refreshAssets = useCallback(async (projectId: string) => {
-    try {
-      setAssets(await loadAudioAssets(projectId));
-    } catch (exc) {
-      setWorkspaceError(exc instanceof Error ? exc.message : "Could not load audio assets");
-    }
-  }, []);
-
-  const fetchClones = useCallback(async () => {
-    const res = await apiFetch(`${apiUrl}/api/voices/clones`);
-    if (!res.ok) throw new Error(await readApiError(res));
-    const data = await res.json();
-    setClones(data.clones ?? []);
-  }, [apiUrl]);
-
   useEffect(() => {
     let cancelled = false;
     void rehydrateTauriGlobals().finally(() => {
@@ -199,70 +181,6 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    void refreshWorkspace();
-  }, [refreshWorkspace]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const { signal } = controller;
-    async function loadBackend() {
-      try {
-        const health = await apiFetch(`${apiUrl}/api/health`, { signal });
-        if (health.ok) {
-          const data = await health.json();
-          if (!signal.aborted) setBackendStatus(`${data.engine} ${data.version}`);
-        }
-      } catch (exc) {
-        if (!signal.aborted && !(exc instanceof DOMException && exc.name === "AbortError")) {
-          setBackendError("Backend is not reachable yet.");
-        }
-      }
-
-      try {
-        const res = await apiFetch(`${apiUrl}/api/voices`, { signal });
-        if (!res.ok) throw new Error(await readApiError(res));
-        const data = await res.json();
-        if (!signal.aborted) {
-          setVoices(data.voices ?? []);
-          setVoicesError(null);
-        }
-      } catch (exc) {
-        if (!signal.aborted && !(exc instanceof DOMException && exc.name === "AbortError")) {
-          setVoicesError(exc instanceof Error ? exc.message : "Could not load voices");
-        }
-      }
-
-      try {
-        await fetchClones();
-      } catch {
-        if (!signal.aborted) setClones([]);
-      }
-
-      try {
-        const res = await apiFetch(`${apiUrl}/api/local-models`, { signal });
-        if (!res.ok) throw new Error(await readApiError(res));
-        const data = await res.json();
-        if (!signal.aborted) {
-          setLocalModels(data.models ?? []);
-          setLocalModelError(null);
-        }
-      } catch (exc) {
-        if (!signal.aborted && !(exc instanceof DOMException && exc.name === "AbortError")) {
-          setLocalModels([]);
-          setLocalModelError(
-            exc instanceof Error ? exc.message : "Could not load local model status"
-          );
-        }
-      }
-    }
-
-    void loadBackend();
-    return () => {
-      controller.abort();
-    };
-  }, [apiUrl, fetchClones]);
 
   useEffect(() => {
     if (!selectedVoiceKey && voiceOptions.length > 0) {
@@ -297,18 +215,6 @@ export default function Home() {
     };
   }, [assets]);
 
-  function persistProject(project: KuralProject) {
-    const next = { ...project, updatedAt: new Date().toISOString() };
-    setProjects((current) =>
-      current
-        .map((candidate) => (candidate.id === next.id ? next : candidate))
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    );
-    void saveProject(next).catch((exc) => {
-      setWorkspaceError(exc instanceof Error ? exc.message : "Could not save project");
-    });
-  }
-
   function updateDocumentText(value: string) {
     if (!activeProject || !activeDocument) return;
     persistProject({
@@ -336,33 +242,6 @@ export default function Home() {
   function updateActiveProjectFields(fields: Partial<KuralProject>) {
     if (!activeProject) return;
     persistProject({ ...activeProject, ...fields });
-  }
-
-  async function createNewProject() {
-    const project = createProject(`Project ${projects.length + 1}`);
-    await saveProject(project);
-    setProjects((current) => [project, ...current]);
-    setActiveProjectId(project.id);
-    storeActiveProject(project.id);
-    setAssets([]);
-  }
-
-  async function removeActiveProject() {
-    if (!activeProject || projects.length <= 1) return;
-    await deleteProject(activeProject.id);
-    const next = projects.find((project) => project.id !== activeProject.id);
-    if (next) {
-      setActiveProjectId(next.id);
-      storeActiveProject(next.id);
-      setProjects((current) => current.filter((project) => project.id !== activeProject.id));
-      await refreshAssets(next.id);
-    }
-  }
-
-  async function switchProject(projectId: string) {
-    setActiveProjectId(projectId);
-    storeActiveProject(projectId);
-    await refreshAssets(projectId);
   }
 
   async function synthesizeText(
@@ -842,7 +721,7 @@ export default function Home() {
       form.append("consent_confirmed", String(cloneConsent));
       const res = await apiFetch(`${apiUrl}/api/voices/clone`, { method: "POST", body: form });
       if (!res.ok) throw new Error(await readApiError(res));
-      await fetchClones();
+      await refreshClones();
       setCloneName("");
       setCloneFile(null);
       setCloneConsent(false);
@@ -857,7 +736,7 @@ export default function Home() {
   async function deleteClone(voiceId: string) {
     const res = await apiFetch(`${apiUrl}/api/voices/clones/${voiceId}`, { method: "DELETE" });
     if (res.ok) {
-      await fetchClones();
+      await refreshClones();
     }
   }
 
@@ -885,7 +764,7 @@ export default function Home() {
       return;
     }
     const data = await res.json();
-    await fetchClones();
+    await refreshClones();
     setCloneMessage(`Imported ${data.total} cloned voice${data.total === 1 ? "" : "s"}.`);
   }
 
@@ -966,7 +845,7 @@ export default function Home() {
               type="button"
               className="col-span-2 rounded border border-red-300 px-2 py-2 text-sm text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-40"
               disabled={projects.length <= 1}
-              onClick={() => void removeActiveProject()}
+              onClick={() => void removeActiveProject(activeProject)}
             >
               Delete Project
             </button>
