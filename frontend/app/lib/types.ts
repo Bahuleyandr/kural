@@ -50,7 +50,7 @@ export interface TranscriptionResponse {
 }
 
 export type Mode = "single" | "batch";
-export type WorkspaceView = "write" | "dubbing" | "pronunciation" | "library";
+export type WorkspaceView = "write" | "voices" | "dubbing" | "pronunciation" | "library";
 export type VoiceKind = "kokoro" | "clone";
 
 export interface VoiceOption {

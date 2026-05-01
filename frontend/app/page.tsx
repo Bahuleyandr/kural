@@ -907,7 +907,7 @@ export default function Home() {
                 </label>
               </div>
               <nav className="flex flex-wrap gap-2" aria-label="Workspace views">
-                {(["write", "dubbing", "pronunciation", "library"] as WorkspaceView[]).map(
+                {(["write", "voices", "dubbing", "pronunciation", "library"] as WorkspaceView[]).map(
                   (view) => (
                     <button
                       type="button"
@@ -1070,30 +1070,72 @@ export default function Home() {
                     </div>
                   </section>
 
-                  <ClonePanel
-                    cloneBusy={cloneBusy}
-                    cloneConsent={cloneConsent}
-                    cloneFile={cloneFile}
-                    cloneLanguage={cloneLanguage}
-                    cloneMessage={cloneMessage}
-                    cloneName={cloneName}
-                    clones={clones}
-                    onCloneConsentChange={setCloneConsent}
-                    onCloneExport={() => void exportClones()}
-                    onCloneFileChange={setCloneFile}
-                    onCloneImport={importCloneArchive}
-                    onCloneLanguageChange={setCloneLanguage}
-                    onCloneNameChange={setCloneName}
-                    onCloneUpload={() => void uploadClone()}
-                    onDeleteClone={(id) => void deleteClone(id)}
-                  />
-
                   <AudioLibrary
                     assets={assets}
                     audioUrls={audioUrls}
                     onDelete={(id) => void deleteAsset(id)}
                   />
                 </div>
+              </div>
+            )}
+
+            {activeView === "voices" && (
+              <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <ClonePanel
+                  cloneBusy={cloneBusy}
+                  cloneConsent={cloneConsent}
+                  cloneFile={cloneFile}
+                  cloneLanguage={cloneLanguage}
+                  cloneMessage={cloneMessage}
+                  cloneName={cloneName}
+                  clones={clones}
+                  onCloneConsentChange={setCloneConsent}
+                  onCloneExport={() => void exportClones()}
+                  onCloneFileChange={setCloneFile}
+                  onCloneImport={importCloneArchive}
+                  onCloneLanguageChange={setCloneLanguage}
+                  onCloneNameChange={setCloneName}
+                  onCloneUpload={() => void uploadClone()}
+                  onDeleteClone={(id) => void deleteClone(id)}
+                />
+
+                <section
+                  className="rounded border border-slate-300 p-3"
+                  aria-labelledby="available-voices-heading"
+                >
+                  <h2 id="available-voices-heading" className="font-semibold">Available Voices</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {voiceOptions.length} local voice{voiceOptions.length === 1 ? "" : "s"}
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {voiceOptions.map((voice) => (
+                      <button
+                        type="button"
+                        key={voice.key}
+                        className={`w-full rounded border px-3 py-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                          selectedVoiceKey === voice.key
+                            ? "border-slate-950 bg-slate-950 text-white"
+                            : "border-slate-200"
+                        }`}
+                        onClick={() => {
+                          setSelectedVoiceKey(voice.key);
+                          setActiveView("write");
+                        }}
+                      >
+                        <span className="block font-medium">{voice.label}</span>
+                        <span className="block text-xs opacity-75">
+                          {voice.kind === "clone" ? "Cloned voice" : "Built-in voice"} /{" "}
+                          {voice.language}
+                        </span>
+                      </button>
+                    ))}
+                    {voiceOptions.length === 0 && (
+                      <p className="rounded border border-slate-200 p-4 text-sm text-slate-500">
+                        No voices loaded yet.
+                      </p>
+                    )}
+                  </div>
+                </section>
               </div>
             )}
 
@@ -1430,28 +1472,11 @@ export default function Home() {
             )}
 
             {activeView === "library" && (
-              <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+              <div className="p-4">
                 <AudioLibrary
                   assets={assets}
                   audioUrls={audioUrls}
                   onDelete={(id) => void deleteAsset(id)}
-                />
-                <ClonePanel
-                  cloneBusy={cloneBusy}
-                  cloneConsent={cloneConsent}
-                  cloneFile={cloneFile}
-                  cloneLanguage={cloneLanguage}
-                  cloneMessage={cloneMessage}
-                  cloneName={cloneName}
-                  clones={clones}
-                  onCloneConsentChange={setCloneConsent}
-                  onCloneExport={() => void exportClones()}
-                  onCloneFileChange={setCloneFile}
-                  onCloneImport={importCloneArchive}
-                  onCloneLanguageChange={setCloneLanguage}
-                  onCloneNameChange={setCloneName}
-                  onCloneUpload={() => void uploadClone()}
-                  onDeleteClone={(id) => void deleteClone(id)}
                 />
               </div>
             )}

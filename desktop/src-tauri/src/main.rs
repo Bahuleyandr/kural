@@ -2,8 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    env,
-    fs,
+    env, fs,
     io::Write,
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -60,11 +59,7 @@ fn ensure_api_key(app_data_dir: &Path) -> std::io::Result<String> {
 /// when models are already present. Errors propagate to the caller, which
 /// surfaces them via `__KURAL_BACKEND_ERROR__` so the frontend can show a
 /// setup banner instead of a blank "backend not reachable" message.
-fn ensure_kokoro_models(
-    backend_dir: &Path,
-    model_dir: &Path,
-    python: &str,
-) -> std::io::Result<()> {
+fn ensure_kokoro_models(backend_dir: &Path, model_dir: &Path, python: &str) -> std::io::Result<()> {
     let model_file = model_dir.join("kokoro-v1.0.int8.onnx");
     let voices_file = model_dir.join("voices-v1.0.bin");
     if model_file.exists() && voices_file.exists() {
@@ -249,10 +244,7 @@ fn start_backend(
             command.env("MODEL_CACHE_DIR", bundled_kokoro);
         }
 
-        let faster_whisper_dir = dir
-            .join("models")
-            .join("asr")
-            .join("faster-whisper-tiny");
+        let faster_whisper_dir = dir.join("models").join("asr").join("faster-whisper-tiny");
         if faster_whisper_dir.exists() {
             command.env("FASTER_WHISPER_MODEL_DIR", faster_whisper_dir);
         }
@@ -337,6 +329,117 @@ fn get_backend_url(port: tauri::State<BackendPort>) -> String {
 #[tauri::command]
 fn get_api_key(key: tauri::State<BackendApiKey>) -> String {
     key.0.clone()
+}
+
+fn default_audio_library_dir() -> Result<PathBuf, String> {
+    let home = if cfg!(windows) {
+        env::var_os("USERPROFILE")
+    } else {
+        env::var_os("HOME")
+    };
+
+    home.map(|path| PathBuf::from(path).join("Music").join("Kural"))
+        .ok_or_else(|| "Could not resolve the user's music folder.".to_string())
+}
+
+fn sanitize_file_name(file_name: &str) -> String {
+    let cleaned: String = file_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | ' ') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = cleaned
+        .trim_matches(|ch| matches!(ch, '.' | '_' | ' '))
+        .trim()
+        .chars()
+        .take(180)
+        .collect::<String>();
+
+    if trimmed.is_empty() {
+        "kural-audio.wav".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn unique_output_path(dir: &Path, file_name: &str) -> PathBuf {
+    let first = dir.join(file_name);
+    if !first.exists() {
+        return first;
+    }
+
+    let source = Path::new(file_name);
+    let stem = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("kural-audio");
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{value}"))
+        .unwrap_or_default();
+
+    for index in 2..1000 {
+        let candidate = dir.join(format!("{stem} ({index}){extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    dir.join(format!("{stem}-new{extension}"))
+}
+
+/// Save a generated clip to a predictable local folder from the desktop app.
+/// The web build falls back to a browser download in the frontend.
+#[tauri::command(rename_all = "camelCase")]
+fn save_audio_file(file_name: String, bytes: Vec<u8>) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("Audio file is empty.".to_string());
+    }
+
+    let output_dir = default_audio_library_dir()?;
+    fs::create_dir_all(&output_dir)
+        .map_err(|err| format!("Could not create audio library folder: {err}"))?;
+
+    let safe_file_name = sanitize_file_name(&file_name);
+    let output_path = unique_output_path(&output_dir, &safe_file_name);
+    if !output_path.starts_with(&output_dir) {
+        return Err("Refusing to save outside the audio library folder.".to_string());
+    }
+
+    fs::write(&output_path, bytes).map_err(|err| format!("Could not save audio file: {err}"))?;
+    Ok(output_path.display().to_string())
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let target = PathBuf::from(path);
+    if !target.exists() {
+        return Err("Saved file no longer exists.".to_string());
+    }
+
+    let status = if cfg!(target_os = "windows") {
+        Command::new("explorer.exe")
+            .arg(format!("/select,{}", target.display()))
+            .status()
+    } else if cfg!(target_os = "macos") {
+        Command::new("open").arg("-R").arg(&target).status()
+    } else {
+        let folder = target.parent().unwrap_or_else(|| Path::new("."));
+        Command::new("xdg-open").arg(folder).status()
+    }
+    .map_err(|err| format!("Could not open file manager: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("File manager exited with {status}"))
+    }
 }
 
 // ── Menu ───────────────────────────────────────────────────────────────────
@@ -470,7 +573,12 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_backend_url, get_api_key])
+        .invoke_handler(tauri::generate_handler![
+            get_backend_url,
+            get_api_key,
+            save_audio_file,
+            reveal_path
+        ])
         .run(tauri::generate_context!())
         .expect("error while running kural");
 }

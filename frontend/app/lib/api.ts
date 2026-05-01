@@ -19,15 +19,19 @@ interface TauriGlobal {
   core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
 }
 
+function getTauriInvoke(): TauriGlobal["invoke"] {
+  if (typeof window === "undefined") return undefined;
+  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+  return tauri?.invoke ?? tauri?.core?.invoke;
+}
+
 /**
  * After a page reload Tauri's initialization_script does not re-run, so the
  * window globals are gone. Call this once on mount to re-hydrate the API
  * URL and API key from the Tauri command surface. No-op outside Tauri.
  */
 export async function rehydrateTauriGlobals(): Promise<void> {
-  if (typeof window === "undefined") return;
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  const invoke = tauri?.invoke ?? tauri?.core?.invoke;
+  const invoke = getTauriInvoke();
   if (!invoke) return;
   try {
     if (!getInjectedValue("__KURAL_API_URL__")) {
@@ -41,6 +45,27 @@ export async function rehydrateTauriGlobals(): Promise<void> {
   } catch {
     // Outside Tauri or command unavailable — fall back to env-based config.
   }
+}
+
+export async function saveAudioFileToFolder(
+  fileName: string,
+  blob: Blob
+): Promise<string | null> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return null;
+
+  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+  return (await invoke("save_audio_file", {
+    fileName,
+    bytes,
+  })) as string;
+}
+
+export async function revealSavedFile(path: string): Promise<boolean> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return false;
+  await invoke("reveal_path", { path });
+  return true;
 }
 
 export async function readApiError(res: Response): Promise<string> {

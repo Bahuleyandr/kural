@@ -49,6 +49,12 @@ describe("AudioLibrary", () => {
     expect(
       screen.getByRole("button", { name: /delete clip: Test clip/i })
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /download clip: Test clip/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /save clip to folder: Test clip/i })
+    ).toBeInTheDocument();
   });
 });
 
