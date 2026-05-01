@@ -1073,6 +1073,7 @@ export default function Home() {
                   <ClonePanel
                     cloneBusy={cloneBusy}
                     cloneConsent={cloneConsent}
+                    cloneFile={cloneFile}
                     cloneLanguage={cloneLanguage}
                     cloneMessage={cloneMessage}
                     cloneName={cloneName}
@@ -1438,6 +1439,7 @@ export default function Home() {
                 <ClonePanel
                   cloneBusy={cloneBusy}
                   cloneConsent={cloneConsent}
+                  cloneFile={cloneFile}
                   cloneLanguage={cloneLanguage}
                   cloneMessage={cloneMessage}
                   cloneName={cloneName}
