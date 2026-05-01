@@ -29,12 +29,13 @@ cd desktop
 ./build-installer.sh
 ```
 
-This provisions `desktop/runtime/python`, downloads Kokoro model files into
-`desktop/runtime/models/kokoro`, renders an unsigned installer config, builds
-the static frontend, and then runs the Tauri bundle build. On Windows it targets
-NSIS and MSI installers. Use `-WithLocalModels` / `--with-local-models` to also
-bundle the optional Faster-Whisper and Argos packs, and `-WithClone` /
-`--with-clone` to include the optional Chatterbox runtime.
+This provisions `desktop/runtime/python` with the Kokoro and Chatterbox
+runtimes, downloads Kokoro model files into `desktop/runtime/models/kokoro`,
+renders an unsigned installer config, builds the static frontend, and then runs
+the Tauri bundle build. On Windows it targets NSIS and MSI installers. Use
+`--with-local-models` to also bundle the optional Faster-Whisper and Argos packs,
+or `--without-clone` for a smaller Kokoro-only build without cloned-voice
+synthesis.
 
 ## Production Build
 
@@ -51,8 +52,9 @@ Release signing and updater keys are intentionally disabled until the first sign
 python scripts/provision-backend-runtime.py --target runtime/python
 ```
 
-Add `--with-clone` to include Chatterbox dependencies in the bundled runtime.
-Add `--with-local-models` to include ASR/translation adapter dependencies. The
+Chatterbox dependencies are included in the bundled runtime by default; pass
+`--without-clone` only for a smaller Kokoro-only build. Add `--with-local-models`
+to include ASR/translation adapter dependencies. The
 desktop app discovers the bundled runtime at `resources/python/bin/python` on
 Linux/macOS or `resources/python/Scripts/python.exe` on Windows.
 

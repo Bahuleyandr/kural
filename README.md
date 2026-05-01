@@ -53,6 +53,11 @@ cd desktop
 Signed public installers are a release step once Windows/macOS signing
 certificates are available.
 
+Desktop installer builds include the Kokoro and Chatterbox runtimes by default,
+so saved cloned voices can synthesize offline once the required model cache is
+present. Pass `--without-clone` only when building a smaller Kokoro-only test
+installer.
+
 ### Local development
 
 **One-command local runtime:**
