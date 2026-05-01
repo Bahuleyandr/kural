@@ -14,6 +14,8 @@ class Settings(BaseSettings):
         "http://localhost:3001",
         "http://localhost:8080",
         "http://127.0.0.1:3000",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
     ]
     max_text_length: int = 10000
 
