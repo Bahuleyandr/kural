@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AudioLibrary } from "../app/components/AudioLibrary";
@@ -98,6 +98,7 @@ describe("ClonePanel", () => {
       <ClonePanel
         cloneBusy
         cloneConsent
+        cloneFile={null}
         cloneLanguage="en-US"
         cloneMessage=""
         cloneName="x"
@@ -114,6 +115,36 @@ describe("ClonePanel", () => {
     );
     const button = screen.getByRole("button", { name: /cloning/i });
     expect(button).toBeDisabled();
+  });
+
+  it("shows clone guidance and the local recording script", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ClonePanel
+        cloneBusy={false}
+        cloneConsent={false}
+        cloneFile={null}
+        cloneLanguage="en-US"
+        cloneMessage=""
+        cloneName=""
+        clones={[]}
+        onCloneConsentChange={() => undefined}
+        onCloneExport={() => undefined}
+        onCloneFileChange={() => undefined}
+        onCloneImport={() => undefined}
+        onCloneLanguageChange={() => undefined}
+        onCloneNameChange={() => undefined}
+        onCloneUpload={() => undefined}
+        onDeleteClone={() => undefined}
+      />
+    );
+    const view = within(container);
+
+    expect(view.getByText(/5 to 30 second sample/i)).toBeInTheDocument();
+    await user.click(view.getByRole("tab", { name: /record/i }));
+    expect(view.getByText(/read this aloud/i)).toBeInTheDocument();
+    expect(view.getByText(/this is my Kural voice sample/i)).toBeInTheDocument();
+    expect(view.getByRole("button", { name: /start recording/i })).toBeInTheDocument();
   });
 });
 
