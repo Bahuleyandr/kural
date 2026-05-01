@@ -28,14 +28,14 @@ cd desktop
 ```
 
 Both wrappers shell out to `desktop/scripts/build_desktop.py installer`. The
-script provisions a bundled Python backend runtime, downloads the Kokoro ONNX
-weights into `desktop/runtime/models/kokoro`, renders the installer config,
-builds the static frontend, builds the Tauri installer, and runs
-`smoke-release-artifacts.py` against the output.
+script provisions a bundled Python backend runtime with Kokoro and Chatterbox,
+downloads the Kokoro ONNX weights into `desktop/runtime/models/kokoro`, renders
+the installer config, builds the static frontend, builds the Tauri installer,
+and runs `smoke-release-artifacts.py` against the output.
 
 Optional flags forwarded straight through to `build_desktop.py`:
 
-- `--with-clone` — bundle Chatterbox voice-clone runtime
+- `--without-clone` — skip Chatterbox for a smaller Kokoro-only build
 - `--with-local-models` — bundle Faster-Whisper + Argos packs from
   `KURAL_LOCAL_MODELS_ROOT` (or provision new ones)
 - `--skip-runtime-provision` — reuse `desktop/runtime/python`

@@ -27,7 +27,19 @@ FRONTEND_DIR = REPO_ROOT / "frontend"
 def _parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(prog="build_desktop.py", description=__doc__)
     parser.add_argument("mode", choices=("installer", "release"))
-    parser.add_argument("--with-clone", action="store_true")
+    parser.add_argument(
+        "--with-clone",
+        dest="with_clone",
+        action="store_true",
+        default=None,
+        help="Bundle the Chatterbox voice-clone runtime. Enabled by default.",
+    )
+    parser.add_argument(
+        "--without-clone",
+        dest="with_clone",
+        action="store_false",
+        help="Build a smaller Kokoro-only desktop runtime without cloned-voice synthesis.",
+    )
     parser.add_argument(
         "--with-local-models",
         action="store_true",
@@ -48,6 +60,8 @@ def _parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
         help="Pre-staged local-models directory; otherwise provisioned in-tree.",
     )
     args, tauri_args = parser.parse_known_args(argv)
+    if args.with_clone is None:
+        args.with_clone = True
     if tauri_args and tauri_args[0] == "--":
         tauri_args = tauri_args[1:]
     return args, tauri_args

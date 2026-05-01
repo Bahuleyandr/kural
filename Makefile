@@ -40,7 +40,7 @@ desktop-installer:
 	cd desktop && ./build-installer.sh
 
 desktop-runtime:
-	cd desktop && python scripts/provision-backend-runtime.py --target runtime/python
+	cd desktop && python scripts/provision-backend-runtime.py --target runtime/python --with-clone
 
 desktop-smoke:
 	cd desktop && python scripts/smoke-release-artifacts.py
