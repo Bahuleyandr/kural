@@ -22,11 +22,12 @@ import {
   toApiRules,
 } from "./lib/clientUtils";
 import { formatTime, parseTranscript } from "./lib/dubbing";
-import type {
-  Mode,
-  TranscriptionResponse,
-  WorkspaceView,
-} from "./lib/types";
+import {
+  PERFORMANCE_STYLES,
+  applyPerformanceStyle,
+  prepareTextForPerformance,
+} from "./lib/performanceStyles";
+import type { Mode, TranscriptionResponse, WorkspaceView } from "./lib/types";
 import { stitchWavBlobs } from "./lib/wav";
 import {
   DEFAULT_CONTROLS,
@@ -85,7 +86,10 @@ export default function Home() {
 
   const [selectedVoiceKey, setSelectedVoiceKey] = useState("");
   const [languageFilter, setLanguageFilter] = useState("all");
-  const [controls, setControls] = useState<AudioControls>(DEFAULT_CONTROLS);
+  const [performanceStyleId, setPerformanceStyleId] = useState("natural");
+  const [controls, setControls] = useState<AudioControls>(() =>
+    applyPerformanceStyle(DEFAULT_CONTROLS, "natural")
+  );
   const [ssmlEnabled, setSsmlEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -253,13 +257,16 @@ export default function Home() {
     if (!voiceKey) throw new Error("Choose a voice before generating audio");
     const selected = parseVoiceKey(voiceKey);
     const activeControls = segment?.controls ?? controls;
+    const prepared = segment
+      ? { text, ssml: false }
+      : prepareTextForPerformance(text, performanceStyleId, ssmlEnabled);
     const body = {
-      text,
+      text: prepared.text,
       voice: selected.kind === "kokoro" ? selected.id : "af_bella",
       voice_id: selected.kind === "clone" ? selected.id : undefined,
       speed: activeControls.speed,
       format: activeControls.format,
-      ssml: !segment && ssmlEnabled,
+      ssml: prepared.ssml,
       controls: toApiControls(activeControls),
       pronunciation_rules: toApiRules(activeProfile.rules),
       language: activeProject.targetLanguage,
@@ -431,6 +438,18 @@ export default function Home() {
   function applyVoicePreset(preset: VoicePreset) {
     setSelectedVoiceKey(`${preset.voiceKind}:${preset.voiceId}`);
     setControls(preset.controls);
+    setPerformanceStyleId("custom");
+  }
+
+  function updatePerformanceStyle(styleId: string) {
+    setPerformanceStyleId(styleId);
+    if (styleId === "custom") return;
+    setControls((current) => applyPerformanceStyle(current, styleId));
+  }
+
+  function updateControls(nextControls: AudioControls) {
+    setPerformanceStyleId("custom");
+    setControls(nextControls);
   }
 
   async function importTranscriptFile(event: ChangeEvent<HTMLInputElement>) {
@@ -1025,10 +1044,13 @@ export default function Home() {
                     controls={controls}
                     languageFilter={languageFilter}
                     languages={allLanguages}
+                    performanceStyleId={performanceStyleId}
+                    performanceStyles={PERFORMANCE_STYLES}
                     selectedVoiceKey={selectedVoiceKey}
                     voiceOptions={voiceOptions}
-                    onControlsChange={setControls}
+                    onControlsChange={updateControls}
                     onLanguageFilterChange={setLanguageFilter}
+                    onPerformanceStyleChange={updatePerformanceStyle}
                     onVoiceChange={setSelectedVoiceKey}
                   />
 

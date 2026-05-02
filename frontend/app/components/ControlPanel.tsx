@@ -1,16 +1,24 @@
 import type { AudioControls, OutputFormat } from "../lib/workspace";
+import type { PerformanceStyle } from "../lib/performanceStyles";
 
 export function ControlPanel(props: {
   controls: AudioControls;
   languageFilter: string;
   languages: string[];
+  performanceStyleId: string;
+  performanceStyles: PerformanceStyle[];
   selectedVoiceKey: string;
   voiceOptions: Array<{ key: string; label: string }>;
   onControlsChange: (controls: AudioControls) => void;
   onLanguageFilterChange: (language: string) => void;
+  onPerformanceStyleChange: (styleId: string) => void;
   onVoiceChange: (voice: string) => void;
 }) {
   const { controls, onControlsChange } = props;
+  const activeStyle = props.performanceStyles.find(
+    (style) => style.id === props.performanceStyleId
+  );
+
   return (
     <section
       className="rounded border border-slate-300 p-3 focus-within:ring-2 focus-within:ring-slate-400"
@@ -31,6 +39,26 @@ export function ControlPanel(props: {
               </option>
             ))}
           </select>
+        </label>
+        <label className="block text-sm">
+          Performance style
+          <select
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
+            value={props.performanceStyleId}
+            onChange={(event) => props.onPerformanceStyleChange(event.target.value)}
+          >
+            {!activeStyle && <option value={props.performanceStyleId}>Custom</option>}
+            {props.performanceStyles.map((style) => (
+              <option key={style.id} value={style.id}>
+                {style.label}
+              </option>
+            ))}
+          </select>
+          {activeStyle && (
+            <span className="mt-1 block text-xs text-slate-500">
+              {activeStyle.description}
+            </span>
+          )}
         </label>
         <label className="block text-sm">
           Voice
