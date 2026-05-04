@@ -69,7 +69,7 @@ test("generates audio and records it in the library", async ({ page }) => {
   await page.getByLabel("Text").fill("Hello Kural");
   await page.getByRole("button", { name: "Generate Audio" }).click();
 
-  await expect(page.getByRole("button", { name: "Hello Kural" })).toBeVisible();
+  await expect(page.getByLabel("Audio Library").getByText("Hello Kural")).toBeVisible();
   await expect(page.getByText(/Bella \/ WAV/)).toBeVisible();
 });
 
@@ -79,11 +79,11 @@ test("persists generated audio across reloads", async ({ page }) => {
 
   await page.getByLabel("Text").fill("Saved for later");
   await page.getByRole("button", { name: "Generate Audio" }).click();
-  await expect(page.getByRole("button", { name: "Saved for later" })).toBeVisible();
+  await expect(page.getByLabel("Audio Library").getByText("Saved for later")).toBeVisible();
 
   await page.reload();
 
-  await expect(page.getByRole("button", { name: "Saved for later" })).toBeVisible();
+  await expect(page.getByLabel("Audio Library").getByText("Saved for later")).toBeVisible();
   await expect(page.getByText(/Bella \/ WAV/)).toBeVisible();
 });
 
@@ -100,7 +100,7 @@ test("batch mode sends one request per item", async ({ page }) => {
   await page.getByLabel("Text").fill("One\n\nTwo");
   await page.getByRole("button", { name: "Generate Batch" }).click();
 
-  await expect(page.getByRole("button", { name: "Two" })).toBeVisible();
+  await expect(page.getByLabel("Audio Library").getByText("Two")).toBeVisible();
   expect(calls).toBe(2);
 });
 
@@ -117,7 +117,7 @@ test("chunks long text and stores one stitched library item", async ({ page }) =
   await page.getByLabel("Text").fill(longText);
   await page.getByRole("button", { name: "Generate Audio" }).click();
 
-  await expect(page.getByRole("button", { name: longText })).toBeVisible();
+  await expect(page.getByLabel("Audio Library").getByText(longText)).toBeVisible();
   expect(calls).toBeGreaterThan(1);
 });
 
@@ -157,8 +157,9 @@ test("surfaces clone upload errors", async ({ page }) => {
     })
   );
   await page.goto("/");
+  await page.getByRole("button", { name: "voices" }).click();
 
-  await page.getByLabel("Audio sample").setInputFiles({
+  await page.locator('input[type="file"][accept*="audio/wav"]').setInputFiles({
     name: "short.wav",
     mimeType: "audio/wav",
     buffer: wav,
@@ -203,6 +204,7 @@ test("exports and imports cloned voices", async ({ page }) => {
     return route.fulfill({ status: 204, body: "" });
   });
   await page.goto("/");
+  await page.getByRole("button", { name: "voices" }).click();
 
   await page.getByRole("button", { name: "Export Voices" }).click();
   await page.locator("#clone-archive-file").setInputFiles({
