@@ -41,6 +41,14 @@ def _parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
         help="Build a smaller Kokoro-only desktop runtime without cloned-voice synthesis.",
     )
     parser.add_argument(
+        "--with-supertonic",
+        dest="with_supertonic",
+        action="store_true",
+        default=False,
+        help="(installer only) bundle the Supertonic multilingual TTS engine and model cache. "
+             "Adds ~400 MB to the installer. Disabled by default.",
+    )
+    parser.add_argument(
         "--with-local-models",
         action="store_true",
         help="(installer only) bundle ASR/translation packs",
@@ -109,6 +117,8 @@ def _provision_runtime(args: argparse.Namespace, target: Path) -> None:
         cmd.append("--with-clone")
     if args.with_local_models:
         cmd.append("--with-local-models")
+    if args.with_supertonic:
+        cmd.append("--with-supertonic")
     _run(cmd)
 
 
@@ -116,6 +126,20 @@ def _provision_models(runtime_python: Path, kokoro_dir: Path) -> None:
     env = os.environ.copy()
     env["MODEL_CACHE_DIR"] = str(kokoro_dir)
     _run([runtime_python, REPO_ROOT / "backend" / "scripts" / "download_models.py"], env=env)
+
+
+def _provision_supertonic_models(runtime_python: Path, supertonic_dir: Path) -> None:
+    env = os.environ.copy()
+    env["SUPERTONIC_MODEL_DIR"] = str(supertonic_dir)
+    _run(
+        [
+            runtime_python,
+            REPO_ROOT / "backend" / "scripts" / "download_models.py",
+            "--supertonic",
+            "--skip-kokoro",
+        ],
+        env=env,
+    )
 
 
 def _stage_local_models(
@@ -214,6 +238,9 @@ def main(argv: Sequence[str]) -> int:
 
     if args.mode == "installer" and not args.skip_model_provision:
         _provision_models(runtime_python, runtime_models / "kokoro")
+
+    if args.mode == "installer" and args.with_supertonic and not args.skip_model_provision:
+        _provision_supertonic_models(runtime_python, runtime_models / "supertonic")
 
     if args.mode == "installer" and args.with_local_models:
         _stage_local_models(runtime_python, runtime_models, args.local_models_root)

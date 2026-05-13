@@ -1,0 +1,15 @@
+# Optional Supertonic runtime dependencies for native multilingual TTS.
+#
+# supertonic 1.2.x declares numpy<2 in its wheel metadata, while kokoro-onnx
+# requires numpy>=2. At runtime both engines coexist fine with numpy 2.x —
+# the upstream pin is overly conservative. Install the runtime deps listed
+# below, then install supertonic itself with --no-deps so Kokoro and
+# Supertonic can share the same Python environment.
+#
+# Recommended install order:
+#   pip install -r requirements.txt
+#   pip install -r requirements-supertonic.txt
+#   pip install --no-deps supertonic>=1.2.0
+#
+onnxruntime>=1.10.0
+huggingface-hub>=0.10.0

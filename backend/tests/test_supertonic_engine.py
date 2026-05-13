@@ -109,3 +109,52 @@ def test_build_supertonic_raises_when_sdk_missing(monkeypatch):
 
     with pytest.raises(RuntimeError, match="supertonic not installed"):
         supertonic_engine._build_supertonic()
+
+
+def test_split_sentences_keeps_punctuation():
+    """Each chunk must carry its terminal punctuation; Supertonic uses
+    sentence-final marks for prosody, so stripping them would flatten
+    the speech."""
+    sents = supertonic_engine._split_sentences(
+        "Hello there. How are you? I am fine!"
+    )
+    assert sents == ["Hello there.", "How are you?", "I am fine!"]
+
+
+def test_split_sentences_handles_no_terminator():
+    """Inputs without a final period must still produce a chunk —
+    otherwise short utterances would round-trip as silence."""
+    sents = supertonic_engine._split_sentences("Just three words")
+    assert sents == ["Just three words"]
+
+
+def test_split_sentences_empty_input():
+    assert supertonic_engine._split_sentences("") == []
+    assert supertonic_engine._split_sentences("   ") == []
+
+
+@pytest.mark.anyio
+async def test_synthesize_stream_yields_one_wav_per_sentence(monkeypatch):
+    """Two sentences in, two WAVs out. This is what makes first-audio
+    latency feel fast on long inputs."""
+    fake = _FakeTTS()
+    registry.reset()
+    monkeypatch.setattr(supertonic_engine, "_build_supertonic", lambda: fake)
+
+    chunks: list[bytes] = []
+    async for chunk in supertonic_engine.synthesize_stream(
+        "Hello there. How are you?", "st_m1_en"
+    ):
+        chunks.append(chunk)
+
+    assert len(chunks) == 2
+    assert all(c[:4] == b"RIFF" for c in chunks)
+    assert [call["text"] for call in fake.calls] == [
+        "Hello there.",
+        "How are you?",
+    ]
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"

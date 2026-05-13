@@ -27,7 +27,7 @@ import {
   applyPerformanceStyle,
   prepareTextForPerformance,
 } from "./lib/performanceStyles";
-import type { Mode, TranscriptionResponse, WorkspaceView } from "./lib/types";
+import type { Mode, TranscriptionResponse, VoiceKind, WorkspaceView } from "./lib/types";
 import { stitchWavBlobs } from "./lib/wav";
 import {
   DEFAULT_CONTROLS,
@@ -130,23 +130,27 @@ export default function Home() {
   );
 
   const voiceOptions = useMemo(() => {
-    const kokoro = voices.map((voice) => ({
-      key: `kokoro:${voice.id}`,
-      label: `${voice.name} (${voice.language})`,
-      shortLabel: voice.name,
-      language: voice.locale || voice.language,
-      kind: "kokoro" as const,
-      id: voice.id,
-    }));
+    const builtin = voices.map((voice) => {
+      const kind: VoiceKind = voice.engine === "supertonic" ? "supertonic" : "kokoro";
+      const tag = kind === "supertonic" ? "Supertonic" : "Kokoro";
+      return {
+        key: `${kind}:${voice.id}`,
+        label: `[${tag}] ${voice.name} (${voice.language})`,
+        shortLabel: voice.name,
+        language: voice.locale || voice.language,
+        kind,
+        id: voice.id,
+      };
+    });
     const cloned = clones.map((clone) => ({
       key: `clone:${clone.id}`,
-      label: `${clone.name} (${clone.language || "custom"})`,
+      label: `[Clone] ${clone.name} (${clone.language || "custom"})`,
       shortLabel: clone.name,
       language: clone.language || "custom",
       kind: "clone" as const,
       id: clone.id,
     }));
-    return [...kokoro, ...cloned].filter(
+    return [...builtin, ...cloned].filter(
       (option) =>
         languageFilter === "all" ||
         option.language === languageFilter ||
@@ -166,7 +170,11 @@ export default function Home() {
       const option =
         voiceOptions.find((candidate) => candidate.key === key) ||
         voices
-          .map((voice) => ({ key: `kokoro:${voice.id}`, shortLabel: voice.name }))
+          .map((voice) => {
+            const kind: VoiceKind =
+              voice.engine === "supertonic" ? "supertonic" : "kokoro";
+            return { key: `${kind}:${voice.id}`, shortLabel: voice.name };
+          })
           .find((candidate) => candidate.key === key) ||
         clones
           .map((clone) => ({ key: `clone:${clone.id}`, shortLabel: clone.name }))
@@ -262,7 +270,7 @@ export default function Home() {
       : prepareTextForPerformance(text, performanceStyleId, ssmlEnabled);
     const body = {
       text: prepared.text,
-      voice: selected.kind === "kokoro" ? selected.id : "af_bella",
+      voice: selected.kind === "clone" ? "af_bella" : selected.id,
       voice_id: selected.kind === "clone" ? selected.id : undefined,
       speed: activeControls.speed,
       format: activeControls.format,

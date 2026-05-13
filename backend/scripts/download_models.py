@@ -50,20 +50,20 @@ def download_kokoro():
 
 
 def download_supertonic():
-    """Pre-warm the Supertonic Hugging Face cache by instantiating the SDK once."""
+    """Pre-warm the Supertonic model cache by instantiating the SDK once."""
     SUPERTONIC_DIR.mkdir(parents=True, exist_ok=True)
-    os.environ["HF_HOME"] = str(SUPERTONIC_DIR)
-    os.environ["HUGGINGFACE_HUB_CACHE"] = str(SUPERTONIC_DIR)
     try:
         from supertonic import TTS
     except ImportError:
         print(
-            "supertonic not installed. Run: pip install -r backend/requirements.txt",
+            "supertonic not installed. Run:\n"
+            "  pip install -r backend/requirements-supertonic.txt\n"
+            "  pip install --no-deps supertonic>=1.2.0",
             file=sys.stderr,
         )
         sys.exit(2)
     print(f"  Provisioning Supertonic into {SUPERTONIC_DIR} ...")
-    TTS(auto_download=True)
+    TTS(model_dir=str(SUPERTONIC_DIR), auto_download=True)
     print("  Supertonic ready.")
 
 

@@ -52,3 +52,26 @@ def test_supertonic_synthesizes_audible_wav():
         frames = wav.readframes(wav.getnframes())
         assert len(frames) > 0
         assert any(b != 0 for b in frames[:4096])
+
+
+def test_supertonic_streams_multiple_chunks():
+    """Two-sentence input must yield two playable WAVs end-to-end. This is
+    the contract the frontend relies on for first-audio latency."""
+    import asyncio
+
+    from app.tts.supertonic_engine import synthesize_stream
+
+    async def _collect():
+        return [
+            chunk
+            async for chunk in synthesize_stream(
+                "First sentence here. Second sentence here.", "st_m1_en"
+            )
+        ]
+
+    chunks = asyncio.run(_collect())
+    assert len(chunks) == 2
+    for chunk in chunks:
+        assert chunk[:4] == b"RIFF"
+        with wave.open(io.BytesIO(chunk), "rb") as wav:
+            assert wav.getnframes() > 0
