@@ -82,10 +82,10 @@ export function downloadBlob(blob: Blob, filename: string): void {
 
 export function parseVoiceKey(key: string): { kind: VoiceKind; id: string } {
   const [kind, ...rest] = key.split(":");
-  return {
-    kind: kind === "clone" ? "clone" : "kokoro",
-    id: rest.join(":") || key,
-  };
+  const id = rest.join(":") || key;
+  if (kind === "clone") return { kind: "clone", id };
+  if (kind === "supertonic") return { kind: "supertonic", id };
+  return { kind: "kokoro", id };
 }
 
 export function toApiControls(controls: AudioControls) {

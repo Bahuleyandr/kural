@@ -16,8 +16,10 @@ encode both into the ID so the existing voice-picker UI works unchanged.
 Notes on Supertonic versus Kokoro:
 - Speed is not exposed by the Supertonic SDK. Speed adjustments still work
   via ``process_wav_audio`` post-processing in the synthesize router.
-- Streaming is not supported by Supertonic; only the non-stream endpoint
-  routes here. ``/api/synthesize/stream`` stays Kokoro-only.
+- Streaming is synthesised by splitting input on sentence boundaries and
+  yielding one WAV per sentence (the SDK has no native streaming
+  generator). This still gives a perceptible first-audio latency win for
+  long inputs without relying on engine-side streaming.
 - Supertonic's expressive tags (``<laugh>``, ``<breath>``, ``<sigh>``) pass
   through as literal text in synthesized output because Kural's SSML
   parser strips unknown tags — this is harmless; supporting them is a
@@ -28,8 +30,9 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import numpy as np
 import soundfile as sf
@@ -91,22 +94,17 @@ def _model_dir() -> Path:
 
 
 def _build_supertonic() -> Any:
-    """Load the Supertonic TTS engine, redirecting model cache to model_dir."""
+    """Load the Supertonic TTS engine, pointing the SDK at our cache dir."""
     try:
         from supertonic import TTS
     except ImportError as exc:
         raise RuntimeError(
-            "supertonic not installed. Run: pip install supertonic"
+            "supertonic not installed. Run: pip install --no-deps supertonic>=1.2.0"
         ) from exc
 
     model_dir = _model_dir()
-    # The supertonic SDK reads HF_HOME / HUGGINGFACE_HUB_CACHE; point those
-    # at our cache dir so models don't leak into the global HF cache.
-    os.environ.setdefault("HF_HOME", str(model_dir))
-    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(model_dir))
-
     try:
-        return TTS(auto_download=True)
+        return TTS(model_dir=str(model_dir), auto_download=True)
     except Exception as exc:
         raise RuntimeError(
             f"Supertonic failed to initialize from {model_dir}. "
@@ -146,6 +144,19 @@ def is_supertonic_voice(voice: str | None) -> bool:
     return bool(voice) and voice.startswith(VOICE_ID_PREFIX)
 
 
+def _wav_from_sdk_output(tts: Any, result: Any) -> bytes:
+    # The SDK returns (wav, duration); older snapshots return just wav.
+    wav = result[0] if isinstance(result, tuple) else result
+    if hasattr(wav, "cpu"):
+        samples = wav.squeeze().cpu().numpy()
+    elif hasattr(wav, "numpy"):
+        samples = wav.squeeze().numpy()
+    else:
+        samples = np.asarray(wav).squeeze()
+    sample_rate = getattr(tts, "sample_rate", None) or getattr(tts, "sr", None) or 24000
+    return _ndarray_to_wav_bytes(samples, int(sample_rate))
+
+
 def synthesize(text: str, voice: str) -> bytes:
     """Synthesize ``text`` using the Supertonic engine. Returns WAV bytes."""
     style, lang = _parse_voice_id(voice)
@@ -156,20 +167,36 @@ def synthesize(text: str, voice: str) -> bytes:
         raise ValueError(
             f"Unknown Supertonic voice style {style!r} (voice id {voice!r})"
         ) from exc
-
     result = tts.synthesize(text, voice_style=voice_style, lang=lang)
-    # The SDK returns (wav, duration); older snapshots return just wav.
-    if isinstance(result, tuple):
-        wav = result[0]
-    else:
-        wav = result
+    return _wav_from_sdk_output(tts, result)
 
-    if hasattr(wav, "cpu"):
-        samples = wav.squeeze().cpu().numpy()
-    elif hasattr(wav, "numpy"):
-        samples = wav.squeeze().numpy()
-    else:
-        samples = np.asarray(wav).squeeze()
 
-    sample_rate = getattr(tts, "sample_rate", None) or getattr(tts, "sr", None) or 24000
-    return _ndarray_to_wav_bytes(samples, int(sample_rate))
+# Sentence-ish splitter. Keep it simple — Supertonic absorbs prosody from
+# punctuation, so splitting on `.!?` then re-attaching the delimiter is
+# good enough to make first-audio land quickly without breaking phrases.
+_SENTENCE_RE = re.compile(r"[^.!?]+[.!?]+|\S+[^.!?]*$", re.UNICODE)
+
+
+def _split_sentences(text: str) -> list[str]:
+    chunks = [m.group(0).strip() for m in _SENTENCE_RE.finditer(text)]
+    return [c for c in chunks if c]
+
+
+async def synthesize_stream(
+    text: str, voice: str
+) -> AsyncGenerator[bytes, None]:
+    """Yield one WAV per sentence so the client hears audio before the full
+    paragraph has finished rendering. Supertonic has no native streaming
+    generator; this is a pragmatic chunk-by-sentence equivalent."""
+    style, lang = _parse_voice_id(voice)
+    tts = _get_supertonic()
+    try:
+        voice_style = tts.get_voice_style(voice_name=style)
+    except Exception as exc:
+        raise ValueError(
+            f"Unknown Supertonic voice style {style!r} (voice id {voice!r})"
+        ) from exc
+
+    for sentence in _split_sentences(text) or [text]:
+        result = tts.synthesize(sentence, voice_style=voice_style, lang=lang)
+        yield _wav_from_sdk_output(tts, result)

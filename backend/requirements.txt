@@ -12,6 +12,5 @@ defusedxml>=0.7.1,<1.0
 # Pinned to a tested release; bump deliberately and run the integration test
 # (KURAL_RUN_INTEGRATION=1 pytest tests/test_engine_integration.py).
 kokoro-onnx==0.4.9
-# Supertonic — native multilingual ONNX TTS (31 langs in v3).
-# Bundled MIT model from Hugging Face Supertone/supertonic-3.
-supertonic>=0.1.0,<1.0
+# Supertonic is opt-in — pip-installing it pins numpy<2 which conflicts with
+# kokoro-onnx. See requirements-supertonic.txt for the install recipe.

@@ -59,10 +59,21 @@ so saved cloned voices can synthesize offline once the required model cache is
 present. Pass `--without-clone` only when building a smaller Kokoro-only test
 installer.
 
-Supertonic voices (IDs prefixed `st_`) require the `supertonic` pip package
-and a populated model cache. Pre-warm with
-`python backend/scripts/download_models.py --supertonic` once before going
-offline; the cache location defaults to `~/.cache/kural/supertonic`.
+Supertonic voices (IDs prefixed `st_`) require the `supertonic` pip
+package and a populated model cache. The upstream wheel pins `numpy<2`,
+which conflicts with `kokoro-onnx`, so install in this order:
+
+```bash
+cd backend
+pip install -r requirements.txt
+pip install -r requirements-supertonic.txt
+pip install --no-deps supertonic>=1.2.0
+python scripts/download_models.py --supertonic
+```
+
+The cache defaults to `~/.cache/kural/supertonic` (override with
+`SUPERTONIC_MODEL_DIR`). Both engines coexist fine with numpy 2.x at
+runtime — the upstream `<2` pin is overly conservative.
 
 ### Local development
 

@@ -15,6 +15,7 @@ from ..tts.engine import synthesize, synthesize_stream
 from ..tts.supertonic_engine import (
     is_supertonic_voice,
     synthesize as synthesize_supertonic,
+    synthesize_stream as synthesize_supertonic_stream,
 )
 
 router = APIRouter(tags=["synthesis"])
@@ -193,8 +194,15 @@ async def synthesize_stream_audio(
 ) -> StreamingResponse:
     async def _gen():
         try:
-            async for chunk in synthesize_stream(text, voice, speed):
-                yield chunk
+            if is_supertonic_voice(voice):
+                # Supertonic has no native streaming generator; we chunk by
+                # sentence so first-audio still lands quickly. speed is
+                # ignored — post-processing already covers it.
+                async for chunk in synthesize_supertonic_stream(text, voice):
+                    yield chunk
+            else:
+                async for chunk in synthesize_stream(text, voice, speed):
+                    yield chunk
         except RuntimeError as exc:
             raise exc
 

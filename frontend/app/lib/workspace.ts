@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 
 import { loadAudioItems } from "./audioLibrary";
+import type { VoiceKind } from "./types";
 
 export type OutputFormat = "wav" | "mp3";
 export type PronunciationMode = "literal" | "word";
@@ -39,7 +40,7 @@ export interface PronunciationProfile {
 export interface VoicePreset {
   id: string;
   name: string;
-  voiceKind: "kokoro" | "clone";
+  voiceKind: VoiceKind;
   voiceId: string;
   voiceLabel: string;
   language: string;

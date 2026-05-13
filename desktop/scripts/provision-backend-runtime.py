@@ -40,6 +40,11 @@ def main() -> int:
         action="store_true",
         help="Install optional local ASR/translation adapter dependencies.",
     )
+    parser.add_argument(
+        "--with-supertonic",
+        action="store_true",
+        help="Install the Supertonic multilingual TTS engine.",
+    )
     args = parser.parse_args()
 
     target = Path(args.target).resolve()
@@ -49,6 +54,8 @@ def main() -> int:
         requirements.append(backend_dir / "requirements-local-models.txt")
     if args.with_clone:
         requirements.append(backend_dir / "requirements-clone.txt")
+    if args.with_supertonic:
+        requirements.append(backend_dir / "requirements-supertonic.txt")
 
     if not runtime_python(target).exists():
         subprocess.run([args.python, "-m", "venv", str(target)], check=True)
@@ -69,6 +76,20 @@ def main() -> int:
             ],
             check=True,
         )
+    if args.with_supertonic:
+        # --no-deps so the upstream numpy<2 pin doesn't downgrade the
+        # numpy 2.x that kokoro-onnx + kural-backend depend on.
+        subprocess.run(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--no-deps",
+                "supertonic>=1.2.0",
+            ],
+            check=True,
+        )
 
     manifest = {
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -76,6 +97,7 @@ def main() -> int:
         "requirements": [str(path.relative_to(repo_root)) for path in requirements],
         "with_clone": args.with_clone,
         "with_local_models": args.with_local_models,
+        "with_supertonic": args.with_supertonic,
     }
     (target / "kural-runtime-manifest.json").write_text(
         json.dumps(manifest, indent=2),
