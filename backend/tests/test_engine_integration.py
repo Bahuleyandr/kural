@@ -35,3 +35,20 @@ def test_kokoro_synthesizes_audible_wav():
         assert len(frames) > 0
         # Reject "all zeros" (silent) — engine reported success but produced nothing.
         assert any(b != 0 for b in frames[:4096])
+
+
+def test_supertonic_synthesizes_audible_wav():
+    """Smoke test the real Supertonic pipeline end-to-end. Requires the
+    `supertonic` pip package and a populated SUPERTONIC_MODEL_DIR (or
+    network access for the first-run Hugging Face download)."""
+    from app.tts.supertonic_engine import synthesize
+
+    audio = synthesize("Kural Supertonic integration test.", voice="st_m1_en")
+    assert isinstance(audio, bytes)
+    assert len(audio) > 1024, "WAV is suspiciously small"
+
+    with wave.open(io.BytesIO(audio), "rb") as wav:
+        assert wav.getframerate() >= 16000
+        frames = wav.readframes(wav.getnframes())
+        assert len(frames) > 0
+        assert any(b != 0 for b in frames[:4096])

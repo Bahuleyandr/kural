@@ -6,6 +6,7 @@ Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline.
 
 - **Kokoro TTS** (Apache 2.0): high-quality neural TTS with multiple voices
 - **Chatterbox TTS** (MIT): expressive synthesis with voice cloning support
+- **Supertonic TTS** (MIT): compact ONNX model with native multilingual synthesis (Supertone Inc. open weights, English/Hindi/Japanese/German/French/Spanish exposed initially)
 
 ## Optional Local Multilingual Packs
 
@@ -57,6 +58,11 @@ Desktop installer builds include the Kokoro and Chatterbox runtimes by default,
 so saved cloned voices can synthesize offline once the required model cache is
 present. Pass `--without-clone` only when building a smaller Kokoro-only test
 installer.
+
+Supertonic voices (IDs prefixed `st_`) require the `supertonic` pip package
+and a populated model cache. Pre-warm with
+`python backend/scripts/download_models.py --supertonic` once before going
+offline; the cache location defaults to `~/.cache/kural/supertonic`.
 
 ### Local development
 

@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     kokoro_model_file: str = "kokoro-v1.0.int8.onnx"
     kokoro_voices_file: str = "voices-v1.0.bin"
 
+    # Supertonic ONNX TTS — native multilingual (31 langs in v3). MIT-licensed
+    # open weights from Hugging Face Supertone/supertonic-3. The supertonic
+    # pip package handles the download into HF_HOME on first use; setting
+    # this path overrides where the model and preset voices are cached.
+    supertonic_model_dir: str = "~/.cache/kural/supertonic"
+
     # Chatterbox cloned voice storage
     clone_cache_dir: str = "~/.cache/kural/clones"
     clone_min_duration_s: float = 5.0

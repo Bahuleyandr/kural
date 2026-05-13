@@ -15,7 +15,10 @@ from slowapi.errors import RateLimitExceeded
 
 app = FastAPI(
     title="Kural TTS API",
-    description="Privacy-first, offline text-to-speech powered by Kokoro TTS (Apache 2.0) and Chatterbox TTS (MIT).",
+    description=(
+        "Privacy-first, offline text-to-speech powered by Kokoro TTS (Apache 2.0), "
+        "Chatterbox TTS (MIT, voice cloning), and Supertonic TTS (MIT, native multilingual)."
+    ),
     version=settings.app_version,
     docs_url="/docs",
     redoc_url="/redoc",
