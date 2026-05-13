@@ -12,6 +12,10 @@ from ..tts.audio import process_wav_audio
 from ..tts.pronunciation import apply_pronunciation_rules
 from ..tts.ssml import BreakSegment, TextSegment, parse_ssml, stitch_wav_sequence
 from ..tts.engine import synthesize, synthesize_stream
+from ..tts.supertonic_engine import (
+    is_supertonic_voice,
+    synthesize as synthesize_supertonic,
+)
 
 router = APIRouter(tags=["synthesis"])
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -85,6 +89,14 @@ def _synthesize_ssml(req: SynthesizeRequest) -> bytes:
                 parts.append(segment)
         return stitch_wav_sequence(parts, pause_scale=_pause_scale(req))
 
+    if is_supertonic_voice(req.voice):
+        for segment in segments:
+            if isinstance(segment, TextSegment):
+                parts.append(synthesize_supertonic(segment.text, req.voice))
+            else:
+                parts.append(segment)
+        return stitch_wav_sequence(parts, pause_scale=_pause_scale(req))
+
     for segment in segments:
         if isinstance(segment, TextSegment):
             parts.append(synthesize(segment.text, req.voice, speed))
@@ -114,6 +126,25 @@ async def synthesize_audio(request: Request, req: SynthesizeRequest) -> Response
             )
             media_type = "audio/wav"
             filename = "kural_speech.wav"
+        elif is_supertonic_voice(req.voice):
+            # Native multilingual path via Supertonic
+            audio_bytes = await loop.run_in_executor(
+                _executor,
+                lambda: _synthesize_ssml(req)
+                if req.ssml
+                else synthesize_supertonic(_prepared_text(req), req.voice),
+            )
+            audio_bytes = await loop.run_in_executor(
+                _executor,
+                lambda: process_wav_audio(audio_bytes, _controls(req)),
+            )
+            if req.format == "mp3":
+                audio_bytes = await loop.run_in_executor(
+                    _executor,
+                    lambda: _wav_to_mp3(audio_bytes),
+                )
+            media_type = "audio/mpeg" if req.format == "mp3" else "audio/wav"
+            filename = f"kural_speech.{req.format}"
         else:
             # Standard Kokoro path
             audio_bytes = await loop.run_in_executor(
