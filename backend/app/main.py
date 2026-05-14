@@ -72,5 +72,8 @@ app.include_router(voices.router, prefix="/api", dependencies=_protected)
 app.include_router(clones.router, prefix="/api", dependencies=_protected)
 app.include_router(synthesize.router, prefix="/api", dependencies=_protected)
 app.include_router(local_models.router, prefix="/api", dependencies=_protected)
+# WebSocket streaming router self-authenticates (see local_models.py) —
+# the require_api_key dependency is HTTP-only and can't gate a WS route.
+app.include_router(local_models.stream_router, prefix="/api")
 app.include_router(setup.router, prefix="/api", dependencies=_protected)
 app.include_router(telemetry.router, prefix="/api", dependencies=_protected)
