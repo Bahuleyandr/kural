@@ -62,6 +62,10 @@ def local_model_inventory() -> list[LocalModelInfo]:
     )
     chatterbox_installed = _module_available("chatterbox")
 
+    supertonic_dir = _expand(settings.supertonic_model_dir)
+    supertonic_installed = _module_available("supertonic")
+    supertonic_provisioned = supertonic_installed and _has_files(supertonic_dir)
+
     whisper_dir = _expand(settings.faster_whisper_model_dir)
     vosk_dir = _expand(settings.vosk_model_dir)
     argos_dir = _configure_argos_dir()
@@ -107,6 +111,34 @@ def local_model_inventory() -> list[LocalModelInfo]:
             capabilities=["voice-clone", "wav", "watermark"],
             license="MIT",
             detail=None if chatterbox_installed else "Install backend/requirements-clone.txt to enable cloning.",
+        ),
+        LocalModelInfo(
+            id="supertonic-3-onnx",
+            name="Supertonic 3 ONNX",
+            category="tts",
+            provider="supertonic",
+            status="ready"
+            if supertonic_provisioned
+            else "not_configured"
+            if supertonic_installed
+            else "not_installed",
+            languages=[
+                "en-US",
+                "hi-IN",
+                "ja-JP",
+                "de-DE",
+                "fr-FR",
+                "es-ES",
+            ],
+            capabilities=["tts", "ssml", "wav", "mp3", "advanced-controls", "multilingual"],
+            license="MIT",
+            path=_path_text(supertonic_dir),
+            detail=None
+            if supertonic_provisioned
+            else "Install backend/requirements-supertonic.txt + `pip install --no-deps supertonic`, "
+            "then run backend/scripts/download_models.py --supertonic."
+            if supertonic_installed
+            else "Install backend/requirements-supertonic.txt and `pip install --no-deps supertonic` to enable Supertonic.",
         ),
         LocalModelInfo(
             id="faster-whisper",
