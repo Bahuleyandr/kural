@@ -1,10 +1,12 @@
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 
+from ..auth import check_api_key
 from ..config import settings
-from ..local_models.asr import align_audio, transcribe_audio
+from ..local_models.asr import StreamingTranscriber, align_audio, transcribe_audio
 from ..local_models.registry import local_model_inventory
 from ..local_models.translation import LocalModelUnavailable, translate_text
 from ..models import (
@@ -17,6 +19,11 @@ from ..models import (
 )
 
 router = APIRouter(tags=["local-models"])
+# The WebSocket streaming route lives on its own router because the main
+# router's require_api_key dependency uses APIKeyHeader, an HTTP-only
+# Security scheme that can't resolve against a WebSocket handshake. The
+# streaming route below self-authenticates via auth.check_api_key.
+stream_router = APIRouter(tags=["local-models"])
 _executor = ThreadPoolExecutor(max_workers=1)
 
 _ACCEPTED_TRANSCRIBE_MIME = {
@@ -120,6 +127,84 @@ async def transcribe(
             for segment in result.segments
         ],
     )
+
+
+@stream_router.websocket("/transcribe/stream")
+async def transcribe_stream(websocket: WebSocket) -> None:
+    """Incremental speech-to-text over WebSocket, backed by Vosk.
+
+    Powers the desktop dictation widget. Protocol:
+      - Connect with optional ``?language=<bcp47>&sample_rate=<hz>`` query
+        params (sample_rate defaults to 16000).
+      - Send binary frames of little-endian PCM16 mono audio.
+      - Receive JSON frames: ``{"type": "partial"|"final", "text": ...}``.
+        A "partial" is the in-progress hypothesis; a "final" lands when
+        Vosk detects an utterance boundary.
+      - Send ``{"type": "done"}`` (or just disconnect) to flush the
+        trailing utterance — the server replies with one
+        ``{"type": "final", "text": ..., "complete": true}`` and closes.
+
+    Streaming is Vosk-only: faster-whisper and whisper.cpp are batch
+    engines. If Vosk isn't configured the server accepts the socket,
+    sends one ``{"type": "error", ...}`` frame, and closes — the widget
+    can fall back to the batch `/api/transcribe` endpoint.
+    """
+    # Self-authenticate: this route isn't on the require_api_key router.
+    if not check_api_key(websocket.headers.get("x-api-key")):
+        await websocket.close(code=1008)  # policy violation
+        return
+
+    await websocket.accept()
+
+    language = websocket.query_params.get("language") or None
+    try:
+        sample_rate = int(websocket.query_params.get("sample_rate", "16000"))
+    except ValueError:
+        sample_rate = 16000
+
+    try:
+        transcriber = StreamingTranscriber(language=language, sample_rate=sample_rate)
+    except LocalModelUnavailable as exc:
+        await websocket.send_json(
+            {"type": "error", "code": "local_asr_unavailable", "message": str(exc)}
+        )
+        await websocket.close(code=1011)
+        return
+
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+
+            chunk = message.get("bytes")
+            if chunk is not None:
+                if not chunk:
+                    continue
+                result = await loop.run_in_executor(_executor, transcriber.accept, chunk)
+                await websocket.send_json(result)
+                continue
+
+            text = message.get("text")
+            if text is not None:
+                try:
+                    payload = json.loads(text)
+                except ValueError:
+                    continue
+                if payload.get("type") == "done":
+                    final = await loop.run_in_executor(_executor, transcriber.finalize)
+                    await websocket.send_json(final)
+                    break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # The client may already be gone (disconnect); closing twice is
+        # harmless but can raise, so swallow it.
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
 
 
 @router.post("/align", response_model=AlignmentResponse)

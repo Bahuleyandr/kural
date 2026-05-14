@@ -146,6 +146,7 @@ kural-mcp   # runs over stdio; expects the backend on KURAL_HOST
 | DELETE | `/api/voices/clones/{id}` | Delete a cloned voice |
 | GET | `/api/local-models` | Inspect optional local ASR/translation adapters |
 | POST | `/api/transcribe` | Transcribe local audio/video into dubbing segments |
+| WS | `/api/transcribe/stream` | Incremental speech-to-text over WebSocket (Vosk-backed; powers the dictation widget) |
 | POST | `/api/translate` | Translate local script text with installed packages |
 | GET | `/api/health` | Health check (also exposed at `/healthz` for Docker) |
 

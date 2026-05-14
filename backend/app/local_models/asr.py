@@ -150,9 +150,15 @@ def _ffmpeg_to_pcm16(audio_bytes: bytes) -> bytes:
     return result.stdout
 
 
-def _transcribe_vosk(audio_bytes: bytes, language: str | None) -> AsrResult:
+def _load_vosk_model():
+    """Import vosk and load the configured model, caching it process-wide.
+
+    Raises LocalModelUnavailable with an actionable hint when vosk isn't
+    installed or VOSK_MODEL_DIR isn't pointed at a model folder. Shared by
+    the batch transcription path and the streaming WebSocket transcriber.
+    """
     try:
-        from vosk import KaldiRecognizer, Model
+        from vosk import Model
     except ImportError as exc:
         raise LocalModelUnavailable("vosk is not installed.") from exc
 
@@ -163,9 +169,18 @@ def _transcribe_vosk(audio_bytes: bytes, language: str | None) -> AsrResult:
     global _vosk_model
     if _vosk_model is None:
         _vosk_model = Model(str(model_dir))
+    return _vosk_model
 
+
+def _transcribe_vosk(audio_bytes: bytes, language: str | None) -> AsrResult:
+    try:
+        from vosk import KaldiRecognizer
+    except ImportError as exc:
+        raise LocalModelUnavailable("vosk is not installed.") from exc
+
+    model = _load_vosk_model()
     pcm = _ffmpeg_to_pcm16(audio_bytes)
-    recognizer = KaldiRecognizer(_vosk_model, 16000)
+    recognizer = KaldiRecognizer(model, 16000)
     recognizer.SetWords(True)
     fragments: list[str] = []
     for offset in range(0, len(pcm), 4000):
@@ -184,6 +199,51 @@ def _transcribe_vosk(audio_bytes: bytes, language: str | None) -> AsrResult:
         language=_lang_code(language),
         segments=[segment] if segment else [],
     )
+
+
+class StreamingTranscriber:
+    """Incremental Vosk transcription for the streaming WebSocket endpoint.
+
+    Vosk is the only one of Kural's three ASR engines that is natively
+    streaming — faster-whisper and whisper.cpp are batch-only — so the
+    streaming dictation path is Vosk-backed. Construct one per WebSocket
+    connection; it owns a KaldiRecognizer and is not thread-safe.
+
+    Audio contract: callers feed raw little-endian PCM16 mono samples at
+    ``sample_rate`` Hz. The streaming path deliberately does not run
+    ffmpeg per chunk — streamed chunks are not independently decodable,
+    so the client is responsible for delivering raw PCM.
+    """
+
+    def __init__(self, language: str | None = None, sample_rate: int = 16000) -> None:
+        try:
+            from vosk import KaldiRecognizer
+        except ImportError as exc:
+            raise LocalModelUnavailable("vosk is not installed.") from exc
+
+        model = _load_vosk_model()
+        self.sample_rate = sample_rate
+        self.language = _lang_code(language)
+        self._recognizer = KaldiRecognizer(model, float(sample_rate))
+        self._recognizer.SetWords(False)
+
+    def accept(self, pcm_chunk: bytes) -> dict:
+        """Feed one PCM16 chunk. Returns a partial or final result dict.
+
+        A "final" result means Vosk detected an utterance boundary; a
+        "partial" result is the in-progress hypothesis for the current
+        utterance.
+        """
+        if self._recognizer.AcceptWaveform(pcm_chunk):
+            text = json.loads(self._recognizer.Result()).get("text", "").strip()
+            return {"type": "final", "text": text}
+        partial = json.loads(self._recognizer.PartialResult()).get("partial", "").strip()
+        return {"type": "partial", "text": partial}
+
+    def finalize(self) -> dict:
+        """Flush the recognizer and return the trailing utterance."""
+        text = json.loads(self._recognizer.FinalResult()).get("text", "").strip()
+        return {"type": "final", "text": text, "complete": True}
 
 
 def _transcribe_whisper_cpp(
