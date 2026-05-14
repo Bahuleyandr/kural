@@ -6,6 +6,7 @@ import { AudioLibrary } from "./components/AudioLibrary";
 import { ClonePanel } from "./components/ClonePanel";
 import { ControlPanel } from "./components/ControlPanel";
 import { LocalModelPanel } from "./components/LocalModelPanel";
+import { TtsEnginePanel } from "./components/TtsEnginePanel";
 import { SetupBanner } from "./components/SetupBanner";
 import { useBackendStatus } from "./hooks/useBackendStatus";
 import { useWorkspace } from "./hooks/useWorkspace";
@@ -86,6 +87,7 @@ export default function Home() {
 
   const [selectedVoiceKey, setSelectedVoiceKey] = useState("");
   const [languageFilter, setLanguageFilter] = useState("all");
+  const [engineFilter, setEngineFilter] = useState<"all" | VoiceKind>("all");
   const [performanceStyleId, setPerformanceStyleId] = useState("natural");
   const [controls, setControls] = useState<AudioControls>(() =>
     applyPerformanceStyle(DEFAULT_CONTROLS, "natural")
@@ -1110,62 +1112,99 @@ export default function Home() {
             )}
 
             {activeView === "voices" && (
-              <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <ClonePanel
-                  cloneBusy={cloneBusy}
-                  cloneConsent={cloneConsent}
-                  cloneFile={cloneFile}
-                  cloneLanguage={cloneLanguage}
-                  cloneMessage={cloneMessage}
-                  cloneName={cloneName}
-                  clones={clones}
-                  onCloneConsentChange={setCloneConsent}
-                  onCloneExport={() => void exportClones()}
-                  onCloneFileChange={setCloneFile}
-                  onCloneImport={importCloneArchive}
-                  onCloneLanguageChange={setCloneLanguage}
-                  onCloneNameChange={setCloneName}
-                  onCloneUpload={() => void uploadClone()}
-                  onDeleteClone={(id) => void deleteClone(id)}
-                />
+              <div className="space-y-4 p-4">
+                <TtsEnginePanel models={localModels} error={localModelError} />
 
-                <section
-                  className="rounded border border-slate-300 p-3"
-                  aria-labelledby="available-voices-heading"
-                >
-                  <h2 id="available-voices-heading" className="font-semibold">Available Voices</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {voiceOptions.length} local voice{voiceOptions.length === 1 ? "" : "s"}
-                  </p>
-                  <div className="mt-3 space-y-2">
-                    {voiceOptions.map((voice) => (
-                      <button
-                        type="button"
-                        key={voice.key}
-                        className={`w-full rounded border px-3 py-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
-                          selectedVoiceKey === voice.key
-                            ? "border-slate-950 bg-slate-950 text-white"
-                            : "border-slate-200"
-                        }`}
-                        onClick={() => {
-                          setSelectedVoiceKey(voice.key);
-                          setActiveView("write");
-                        }}
-                      >
-                        <span className="block font-medium">{voice.label}</span>
-                        <span className="block text-xs opacity-75">
-                          {voice.kind === "clone" ? "Cloned voice" : "Built-in voice"} /{" "}
-                          {voice.language}
-                        </span>
-                      </button>
-                    ))}
-                    {voiceOptions.length === 0 && (
-                      <p className="rounded border border-slate-200 p-4 text-sm text-slate-500">
-                        No voices loaded yet.
-                      </p>
-                    )}
-                  </div>
-                </section>
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <ClonePanel
+                    cloneBusy={cloneBusy}
+                    cloneConsent={cloneConsent}
+                    cloneFile={cloneFile}
+                    cloneLanguage={cloneLanguage}
+                    cloneMessage={cloneMessage}
+                    cloneName={cloneName}
+                    clones={clones}
+                    onCloneConsentChange={setCloneConsent}
+                    onCloneExport={() => void exportClones()}
+                    onCloneFileChange={setCloneFile}
+                    onCloneImport={importCloneArchive}
+                    onCloneLanguageChange={setCloneLanguage}
+                    onCloneNameChange={setCloneName}
+                    onCloneUpload={() => void uploadClone()}
+                    onDeleteClone={(id) => void deleteClone(id)}
+                  />
+
+                  <section
+                    className="rounded border border-slate-300 p-3"
+                    aria-labelledby="available-voices-heading"
+                  >
+                    <h2 id="available-voices-heading" className="font-semibold">Available Voices</h2>
+                    {(() => {
+                      const engineVoices = voiceOptions.filter(
+                        (voice) => engineFilter === "all" || voice.kind === engineFilter
+                      );
+                      return (
+                        <>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {engineVoices.length} local voice{engineVoices.length === 1 ? "" : "s"}
+                            {engineFilter !== "all" ? ` · ${engineFilter}` : ""}
+                          </p>
+                          <div
+                            className="mt-2 flex flex-wrap gap-1"
+                            role="group"
+                            aria-label="Filter voices by engine"
+                          >
+                            {(["all", "kokoro", "supertonic", "clone"] as const).map((option) => (
+                              <button
+                                type="button"
+                                key={option}
+                                className={`rounded border px-2 py-1 text-xs capitalize focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                                  engineFilter === option
+                                    ? "border-slate-950 bg-slate-950 text-white"
+                                    : "border-slate-200"
+                                }`}
+                                aria-pressed={engineFilter === option}
+                                onClick={() => setEngineFilter(option)}
+                              >
+                                {option}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {engineVoices.map((voice) => (
+                              <button
+                                type="button"
+                                key={voice.key}
+                                className={`w-full rounded border px-3 py-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                                  selectedVoiceKey === voice.key
+                                    ? "border-slate-950 bg-slate-950 text-white"
+                                    : "border-slate-200"
+                                }`}
+                                onClick={() => {
+                                  setSelectedVoiceKey(voice.key);
+                                  setActiveView("write");
+                                }}
+                              >
+                                <span className="block font-medium">{voice.label}</span>
+                                <span className="block text-xs opacity-75">
+                                  {voice.kind === "clone" ? "Cloned voice" : "Built-in voice"} /{" "}
+                                  {voice.language}
+                                </span>
+                              </button>
+                            ))}
+                            {engineVoices.length === 0 && (
+                              <p className="rounded border border-slate-200 p-4 text-sm text-slate-500">
+                                {voiceOptions.length === 0
+                                  ? "No voices loaded yet."
+                                  : "No voices match this engine filter."}
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </section>
+                </div>
               </div>
             )}
 

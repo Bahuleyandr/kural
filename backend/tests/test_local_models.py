@@ -16,6 +16,24 @@ def test_local_models_inventory_lists_optional_adapters():
     assert {"kokoro", "faster-whisper", "vosk", "argos"}.issubset(providers)
 
 
+def test_local_models_inventory_includes_all_three_tts_engines():
+    """The settings panel reads this endpoint to show engine status, so
+    all three TTS engines must appear as category=tts entries."""
+    res = TestClient(app).get("/api/local-models")
+
+    assert res.status_code == 200
+    tts = {m["provider"]: m for m in res.json()["models"] if m["category"] == "tts"}
+    assert {"kokoro", "chatterbox", "supertonic"} == set(tts)
+    # Supertonic must report an actionable status, never a bare "ready"
+    # unless the cache is genuinely provisioned.
+    assert tts["supertonic"]["status"] in {
+        "ready",
+        "not_configured",
+        "not_installed",
+    }
+    assert tts["supertonic"]["license"] == "MIT"
+
+
 def test_translate_returns_structured_unavailable_error(monkeypatch):
     def fail(_req):
         raise LocalModelUnavailable("No Argos packages")

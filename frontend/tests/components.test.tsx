@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AudioLibrary } from "../app/components/AudioLibrary";
 import { ClonePanel } from "../app/components/ClonePanel";
 import { LocalModelPanel } from "../app/components/LocalModelPanel";
+import { TtsEnginePanel } from "../app/components/TtsEnginePanel";
 import { SetupBanner } from "../app/components/SetupBanner";
 import type { AudioAsset } from "../app/lib/workspace";
 
@@ -95,6 +96,59 @@ describe("LocalModelPanel", () => {
   it("surfaces an error message", () => {
     render(<LocalModelPanel models={[]} error="boom" />);
     expect(screen.getByRole("alert")).toHaveTextContent("boom");
+  });
+});
+
+describe("TtsEnginePanel", () => {
+  const ttsModels = [
+    {
+      id: "kokoro-v1-onnx",
+      name: "Kokoro v1.0 ONNX",
+      category: "tts" as const,
+      provider: "kokoro",
+      status: "ready" as const,
+      languages: ["en-US", "hi-IN"],
+      license: "Apache-2.0",
+    },
+    {
+      id: "supertonic-3-onnx",
+      name: "Supertonic 3 ONNX",
+      category: "tts" as const,
+      provider: "supertonic",
+      status: "not_installed" as const,
+      languages: ["en-US", "hi-IN", "ja-JP"],
+      license: "MIT",
+      detail: "Install backend/requirements-supertonic.txt to enable Supertonic.",
+    },
+    // An ASR model must be ignored — this panel is TTS-only.
+    {
+      id: "fw",
+      name: "faster-whisper",
+      category: "asr" as const,
+      provider: "fw",
+      status: "ready" as const,
+    },
+  ];
+
+  it("shows only TTS-category engines and a ready tally", () => {
+    render(<TtsEnginePanel models={ttsModels} error={null} />);
+    expect(screen.getByText(/1\/2 ready/)).toBeInTheDocument();
+    expect(screen.getByText("Kokoro v1.0 ONNX")).toBeInTheDocument();
+    expect(screen.getByText("Supertonic 3 ONNX")).toBeInTheDocument();
+    expect(screen.queryByText("faster-whisper")).not.toBeInTheDocument();
+  });
+
+  it("surfaces the install hint for an engine that isn't ready", () => {
+    render(<TtsEnginePanel models={ttsModels} error={null} />);
+    // The actionable detail must be visible so the user knows what to install.
+    expect(
+      screen.getByText(/requirements-supertonic\.txt/i)
+    ).toBeInTheDocument();
+  });
+
+  it("renders the empty state when no engines are reported", () => {
+    render(<TtsEnginePanel models={[]} error={null} />);
+    expect(screen.getByText(/no tts engines reported/i)).toBeInTheDocument();
   });
 });
 
