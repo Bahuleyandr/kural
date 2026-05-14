@@ -1,4 +1,4 @@
-.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check test
+.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test mcp-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check test
 
 backend-test:
 	cd backend && python -m pytest
@@ -17,6 +17,9 @@ local-run-setup:
 
 cli-test:
 	cd cli && python -m pip install -e . && python -m pytest
+
+mcp-test:
+	cd mcp && python -m pip install -e ".[dev]" && python -m pytest
 
 frontend-build:
 	cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm run build
@@ -54,4 +57,4 @@ desktop-release-check:
 	printf '{"version":"0.2.0"}' > /tmp/kural-artifacts/latest.json
 	python desktop/scripts/smoke-release-artifacts.py --bundle-dir /tmp/kural-artifacts --require-signatures
 
-test: backend-test cli-test frontend-lint frontend-unit frontend-build
+test: backend-test cli-test mcp-test frontend-lint frontend-unit frontend-build

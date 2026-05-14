@@ -18,9 +18,10 @@ Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline.
 
 ```
 kural/
-  backend/      # Python FastAPI service wrapping Kokoro and Chatterbox
+  backend/      # Python FastAPI service wrapping Kokoro, Chatterbox, and Supertonic
   frontend/     # Next.js creator workspace with projects, dubbing, SSML, and audio library
   cli/          # Python Click CLI: kural speak, kural voices
+  mcp/          # Model Context Protocol server: drive Kural from Claude Code, Cursor, etc.
   desktop/      # Tauri cross-platform desktop app
   docker-compose.yml
 ```
@@ -118,6 +119,17 @@ cd cli
 pip install -e .
 kural speak "Hello, world!"
 kural voices --clones
+```
+
+**MCP server:**
+
+Drive Kural from Claude Code, Cursor, or any MCP client. The server wraps
+a running backend over HTTP — see `mcp/README.md` for client wiring.
+
+```bash
+cd mcp
+pip install -e .
+kural-mcp   # runs over stdio; expects the backend on KURAL_HOST
 ```
 
 ## API
