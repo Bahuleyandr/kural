@@ -16,6 +16,10 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager,
 };
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+/// Accelerator for the dictation widget. Mirrors OmniVoice's Cmd/Ctrl+Shift+Space.
+const DICTATION_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -314,6 +318,25 @@ fn kill_backend(app: &tauri::AppHandle) {
     }
 }
 
+// ── Dictation widget ────────────────────────────────────────────────────────
+
+/// Toggle the frameless dictation widget. The global shortcut and the tray
+/// both route here. Hidden by default; the window itself is created once at
+/// startup so toggling is just show/hide (cheap, preserves widget state).
+fn toggle_dictation_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("dictation") {
+        match win.is_visible() {
+            Ok(true) => {
+                let _ = win.hide();
+            }
+            _ => {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }
+    }
+}
+
 // ── Tauri command ──────────────────────────────────────────────────────────
 
 /// Returns the backend base URL so the webview can use it via Tauri IPC.
@@ -416,6 +439,24 @@ fn save_audio_file(file_name: String, bytes: Vec<u8>) -> Result<String, String> 
     Ok(output_path.display().to_string())
 }
 
+/// Write the dictated transcript to the clipboard and hide the widget.
+///
+/// The widget calls this when the user stops dictation. Doing the
+/// clipboard write + hide in one command keeps the widget's JS free of
+/// plugin-permission wiring — custom commands need no capability entry,
+/// whereas calling the clipboard plugin from JS would.
+#[tauri::command]
+fn dictation_paste(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard()
+        .write_text(text)
+        .map_err(|err| format!("Could not copy transcript to clipboard: {err}"))?;
+    if let Some(win) = app.get_webview_window("dictation") {
+        let _ = win.hide();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     let target = PathBuf::from(path);
@@ -468,9 +509,16 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let open_item = MenuItem::with_id(app, "open", "Open Kural", true, None::<&str>)?;
+    let dictation_item = MenuItem::with_id(
+        app,
+        "dictation",
+        "Dictation Widget (Ctrl+Shift+Space)",
+        true,
+        None::<&str>,
+    )?;
     let sep = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_item, &sep, &quit_item])?;
+    let menu = Menu::with_items(app, &[&open_item, &dictation_item, &sep, &quit_item])?;
 
     let mut builder = TrayIconBuilder::new()
         .menu(&menu)
@@ -482,6 +530,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     let _ = win.set_focus();
                 }
             }
+            "dictation" => toggle_dictation_window(app),
             "quit" => {
                 kill_backend(app);
                 app.exit(0);
@@ -501,6 +550,17 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    // Toggle on key-down only; the handler also fires on release.
+                    if event.state == ShortcutState::Pressed {
+                        toggle_dictation_window(app);
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let port = find_free_port();
             let resource_dir = app.path().resource_dir().ok();
@@ -571,13 +631,58 @@ fn main() {
                 }
             });
 
+            // Dictation widget — frameless, always-on-top, hidden until the
+            // global shortcut or tray summons it. Created once at startup so
+            // toggling is just show/hide and the widget keeps its state.
+            // Next's static export emits this route as `dictation.html`
+            // (no trailingSlash config), not `dictation/index.html`.
+            let dictation = tauri::WebviewWindowBuilder::new(
+                app,
+                "dictation",
+                tauri::WebviewUrl::App("dictation.html".into()),
+            )
+            .initialization_script(&format!(
+                "window.__KURAL_API_URL__ = 'http://127.0.0.1:{port}'; window.__KURAL_API_KEY__ = '{}';",
+                escape_js_string(&api_key)
+            ))
+            .title("Kural Dictation")
+            .inner_size(420.0, 168.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .build()?;
+
+            // Closing the widget just hides it — the shortcut re-summons it.
+            let dictation_clone = dictation.clone();
+            dictation.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let _ = dictation_clone.hide();
+                    api.prevent_close();
+                }
+            });
+
+            // Global shortcut to summon the widget. A failure here — e.g. the
+            // accelerator is already claimed by another app — is non-fatal:
+            // the tray menu still opens the widget.
+            match DICTATION_SHORTCUT.parse::<Shortcut>() {
+                Ok(shortcut) => {
+                    if let Err(err) = app.global_shortcut().register(shortcut) {
+                        eprintln!("kural: failed to register dictation shortcut: {err}");
+                    }
+                }
+                Err(err) => eprintln!("kural: invalid dictation shortcut: {err}"),
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_backend_url,
             get_api_key,
             save_audio_file,
-            reveal_path
+            reveal_path,
+            dictation_paste
         ])
         .run(tauri::generate_context!())
         .expect("error while running kural");

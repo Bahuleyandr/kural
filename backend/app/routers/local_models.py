@@ -148,9 +148,18 @@ async def transcribe_stream(websocket: WebSocket) -> None:
     engines. If Vosk isn't configured the server accepts the socket,
     sends one ``{"type": "error", ...}`` frame, and closes — the widget
     can fall back to the batch `/api/transcribe` endpoint.
+
+    Auth: when KURAL_API_KEY is set, pass it as the ``X-API-Key`` header
+    or — for browser WebSocket clients that cannot set headers — as an
+    ``?api_key=`` query param.
     """
     # Self-authenticate: this route isn't on the require_api_key router.
-    if not check_api_key(websocket.headers.get("x-api-key")):
+    # Browser WebSocket clients (the dictation widget) cannot set headers,
+    # so a query param is accepted as a fallback.
+    provided_key = (
+        websocket.headers.get("x-api-key") or websocket.query_params.get("api_key")
+    )
+    if not check_api_key(provided_key):
         await websocket.close(code=1008)  # policy violation
         return
 
