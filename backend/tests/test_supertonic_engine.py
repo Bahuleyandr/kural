@@ -57,17 +57,39 @@ def test_parse_voice_id_rejects_malformed():
         supertonic_engine._parse_voice_id("st__en")
 
 
-def test_get_voices_contains_curated_matrix():
+def test_get_voices_exposes_full_supertonic_matrix():
+    """Supertonic v3 ships 10 voice styles × 31 languages. The catalog must
+    surface every (style, language) pair so the picker can offer them all —
+    trimming the matrix in code would silently hide functionality the model
+    supports natively."""
     voices = supertonic_engine.get_voices()
     ids = {v["id"] for v in voices}
 
-    # Spot-check a few combinations from the curated style × lang table.
+    assert len(voices) == 10 * 31
+
+    # All 10 voice styles must be represented.
+    styles = {voice_id.split("_")[1] for voice_id in ids}
+    assert styles == {"m1", "m2", "m3", "m4", "m5", "f1", "f2", "f3", "f4", "f5"}
+
+    # All 31 v3 languages must be represented.
+    langs = {voice_id.rsplit("_", 1)[1] for voice_id in ids}
+    expected_langs = {
+        "en", "hi", "ja", "ko", "de", "fr", "es", "it", "pt", "ru",
+        "ar", "tr", "vi", "id", "nl", "pl", "uk", "cs", "ro", "el",
+        "hu", "sv", "da", "fi", "bg", "hr", "sk", "sl", "lt", "lv", "et",
+    }
+    assert langs == expected_langs
+
+    # Spot-check a few combinations across the matrix.
     assert "st_m1_en" in ids
     assert "st_f1_hi" in ids
     assert "st_m2_ja" in ids
-    # Every voice must declare itself as a Supertonic voice.
+    assert "st_m5_vi" in ids  # newly-added style × newly-added language
+    assert "st_f5_ko" in ids
+
+    # Every voice must declare itself as a Supertonic voice and be
+    # language-tagged so the picker can group by locale.
     assert all(v["engine"] == "supertonic" for v in voices)
-    # Every voice must be language-tagged so the picker can group by locale.
     assert all(v["language"] and v["locale"] for v in voices)
 
 

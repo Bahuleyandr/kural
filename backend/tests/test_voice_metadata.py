@@ -21,12 +21,14 @@ def test_voices_includes_supertonic_engine():
     assert {"kokoro", "supertonic"} <= engines
 
 
-def test_voices_supertonic_entries_cover_curated_languages():
+def test_voices_supertonic_entries_cover_full_v3_matrix():
     res = TestClient(app).get("/api/voices")
     supertonic = [v for v in res.json()["voices"] if v["engine"] == "supertonic"]
 
-    assert supertonic, "expected at least one Supertonic voice"
+    # 10 styles × 31 languages = 310 entries.
+    assert len(supertonic) == 310
+
     langs = {v["language"] for v in supertonic}
-    # Hindi coverage is the headline win versus the Kokoro-only baseline.
-    assert "hi" in langs
-    assert "en" in langs
+    # Hindi is the headline win versus the Kokoro-only baseline; spot-check
+    # a few of the long-tail languages too so a future trim doesn't slip in.
+    assert {"en", "hi", "ja", "ko", "ar", "vi"}.issubset(langs)
