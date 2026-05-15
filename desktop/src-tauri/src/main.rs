@@ -634,12 +634,19 @@ fn main() {
             // Dictation widget — frameless, always-on-top, hidden until the
             // global shortcut or tray summons it. Created once at startup so
             // toggling is just show/hide and the widget keeps its state.
-            // Next's static export emits this route as `dictation.html`
-            // (no trailingSlash config), not `dictation/index.html`.
+            // The Next dev server serves this route as `/dictation`; the
+            // release static export emits it as `dictation.html`. Tauri
+            // doesn't normalise the `.html` suffix the way it does for
+            // index.html, so pick the path that matches the build profile.
+            let dictation_path = if cfg!(debug_assertions) {
+                "dictation"
+            } else {
+                "dictation.html"
+            };
             let dictation = tauri::WebviewWindowBuilder::new(
                 app,
                 "dictation",
-                tauri::WebviewUrl::App("dictation.html".into()),
+                tauri::WebviewUrl::App(dictation_path.into()),
             )
             .initialization_script(&format!(
                 "window.__KURAL_API_URL__ = 'http://127.0.0.1:{port}'; window.__KURAL_API_KEY__ = '{}';",
