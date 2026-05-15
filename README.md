@@ -60,6 +60,15 @@ so saved cloned voices can synthesize offline once the required model cache is
 present. Pass `--without-clone` only when building a smaller Kokoro-only test
 installer.
 
+### Dictation widget
+
+The desktop app ships a frameless dictation widget. Press
+`Ctrl+Shift+Space` (`Cmd+Shift+Space` on macOS) — or use the tray menu —
+to summon it, speak, and stop; the transcript is copied to the clipboard
+ready to paste. It streams to the Vosk-backed `/api/transcribe/stream`
+WebSocket, so a local Vosk model must be configured (see
+`docs/LOCAL_MODELS.md`).
+
 Supertonic voices (IDs prefixed `st_`) require the `supertonic` pip
 package and a populated model cache. The upstream wheel pins `numpy<2`,
 which conflicts with `kokoro-onnx`, so install in this order:

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/core-plugin-permission/2",
   "identifier": "default",
-  "description": "Kural default capabilities — IPC for backend URL discovery",
-  "windows": ["main"],
+  "description": "Kural default capabilities — IPC for backend discovery and the dictation widget",
+  "windows": ["main", "dictation"],
   "permissions": [
     "core:default"
   ]

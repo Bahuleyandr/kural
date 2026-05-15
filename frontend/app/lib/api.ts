@@ -9,7 +9,7 @@ export function getApiUrl(): string {
   return injected || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 }
 
-function getApiKey(): string {
+export function getApiKey(): string {
   const injected = getInjectedValue("__KURAL_API_KEY__");
   return injected || process.env.NEXT_PUBLIC_KURAL_API_KEY || "";
 }

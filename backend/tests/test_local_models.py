@@ -202,6 +202,35 @@ def test_transcribe_stream_reports_vosk_unavailable(monkeypatch):
         assert "vosk" in msg["message"]
 
 
+def test_transcribe_stream_accepts_api_key_query_param(monkeypatch):
+    """Browser WebSocket clients can't set headers, so the dictation widget
+    passes the key as ?api_key= — it must authenticate the same way."""
+    monkeypatch.setattr(local_models_router, "StreamingTranscriber", _FakeStreamingTranscriber)
+    monkeypatch.setattr(local_models_router.settings, "api_key", "s3cret")
+
+    client = TestClient(app)
+
+    # Wrong key in the query param → handshake rejected before accept().
+    from starlette.websockets import WebSocketDisconnect as _WSD
+
+    try:
+        with client.websocket_connect("/api/transcribe/stream?api_key=wrong") as ws:
+            ws.receive_json()
+        rejected = False
+    except _WSD:
+        rejected = True
+    assert rejected, "a wrong api_key query param must close the socket"
+
+    # Correct key in the query param → stream works.
+    with client.websocket_connect("/api/transcribe/stream?api_key=s3cret") as ws:
+        ws.send_text('{"type": "done"}')
+        assert ws.receive_json() == {
+            "type": "final",
+            "text": "trailing words",
+            "complete": True,
+        }
+
+
 def test_streaming_transcriber_accept_and_finalize(monkeypatch):
     """Unit-test the real StreamingTranscriber against a fake KaldiRecognizer."""
     fake_vosk = types.ModuleType("vosk")
