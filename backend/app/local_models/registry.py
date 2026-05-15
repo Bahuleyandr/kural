@@ -123,12 +123,12 @@ def local_model_inventory() -> list[LocalModelInfo]:
             if supertonic_installed
             else "not_installed",
             languages=[
-                "en-US",
-                "hi-IN",
-                "ja-JP",
-                "de-DE",
-                "fr-FR",
-                "es-ES",
+                "en-US", "hi-IN", "ja-JP", "ko-KR", "de-DE", "fr-FR",
+                "es-ES", "it-IT", "pt-BR", "ru-RU", "ar-SA", "tr-TR",
+                "vi-VN", "id-ID", "nl-NL", "pl-PL", "uk-UA", "cs-CZ",
+                "ro-RO", "el-GR", "hu-HU", "sv-SE", "da-DK", "fi-FI",
+                "bg-BG", "hr-HR", "sk-SK", "sl-SI", "lt-LT", "lv-LV",
+                "et-EE",
             ],
             capabilities=["tts", "ssml", "wav", "mp3", "advanced-controls", "multilingual"],
             license="MIT",

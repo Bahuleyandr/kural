@@ -44,24 +44,63 @@ _log = logging.getLogger(__name__)
 
 VOICE_ID_PREFIX = "st_"
 
-# Curated voice style × language matrix. Start narrow — Supertonic v3
-# supports 11+ voice styles and 31 languages (= 300+ permutations), but
-# dumping all of them swamps the voice picker. Expand by editing this
-# table; no other code changes needed.
+# Full Supertonic v3 voice style × language matrix — every (style, language)
+# pair the model ships natively. 10 styles × 31 languages = 310 entries.
+# Expand or trim by editing these tables; no other code changes needed.
+#
+# The "description" snippets on the first four styles are aesthetic labels
+# carried over from the curated subset that originally exposed M1/M2/F1/F2.
+# Supertonic publishes no per-style personality metadata, so M3–M5 and F3–F5
+# use neutral ordinal labels rather than invented characteristics — users
+# audition voices to find the one that fits.
 _STYLES = [
     ("m1", "M1", "male", "warm and grounded"),
     ("m2", "M2", "male", "bright and confident"),
+    ("m3", "M3", "male", "third male voice"),
+    ("m4", "M4", "male", "fourth male voice"),
+    ("m5", "M5", "male", "fifth male voice"),
     ("f1", "F1", "female", "clear and articulate"),
     ("f2", "F2", "female", "expressive and lively"),
+    ("f3", "F3", "female", "third female voice"),
+    ("f4", "F4", "female", "fourth female voice"),
+    ("f5", "F5", "female", "fifth female voice"),
 ]
 
+# All 31 languages in Supertonic v3. Locales use the most widely-spoken
+# regional variant of each language (e.g. pt-BR rather than pt-PT) to match
+# Kokoro's existing locale conventions in `local_models.registry`.
 _LANGS = [
     ("en", "en-US", "English"),
     ("hi", "hi-IN", "Hindi"),
     ("ja", "ja-JP", "Japanese"),
+    ("ko", "ko-KR", "Korean"),
     ("de", "de-DE", "German"),
     ("fr", "fr-FR", "French"),
     ("es", "es-ES", "Spanish"),
+    ("it", "it-IT", "Italian"),
+    ("pt", "pt-BR", "Portuguese"),
+    ("ru", "ru-RU", "Russian"),
+    ("ar", "ar-SA", "Arabic"),
+    ("tr", "tr-TR", "Turkish"),
+    ("vi", "vi-VN", "Vietnamese"),
+    ("id", "id-ID", "Indonesian"),
+    ("nl", "nl-NL", "Dutch"),
+    ("pl", "pl-PL", "Polish"),
+    ("uk", "uk-UA", "Ukrainian"),
+    ("cs", "cs-CZ", "Czech"),
+    ("ro", "ro-RO", "Romanian"),
+    ("el", "el-GR", "Greek"),
+    ("hu", "hu-HU", "Hungarian"),
+    ("sv", "sv-SE", "Swedish"),
+    ("da", "da-DK", "Danish"),
+    ("fi", "fi-FI", "Finnish"),
+    ("bg", "bg-BG", "Bulgarian"),
+    ("hr", "hr-HR", "Croatian"),
+    ("sk", "sk-SK", "Slovak"),
+    ("sl", "sl-SI", "Slovenian"),
+    ("lt", "lt-LT", "Lithuanian"),
+    ("lv", "lv-LV", "Latvian"),
+    ("et", "et-EE", "Estonian"),
 ]
 
 
