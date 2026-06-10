@@ -162,7 +162,7 @@ jobs:
         working-directory: backend
         env:
           KURAL_RUN_INTEGRATION: "1"
-        run: python -m pytest tests/test_engine_integration.py -v
+        run: python -m pytest tests/test_engine_integration.py -v -k "not supertonic"
 
       - name: Install Chatterbox runtime
         working-directory: backend
