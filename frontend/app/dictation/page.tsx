@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getApiKey, getApiUrl, rehydrateTauriGlobals } from "../lib/api";
+import { DEFAULT_DICTATION_SETTINGS, loadDictationSettings } from "../lib/dictationSettings";
 import {
   applyTranscriptFrame,
   floatTo16BitPCM,
@@ -42,6 +43,7 @@ function invokeTauri(cmd: string, args?: Record<string, unknown>): Promise<unkno
 export default function DictationWidget() {
   const [state, setState] = useState<DictationState>(INITIAL_DICTATION_STATE);
   const [copied, setCopied] = useState(false);
+  const [settings, setSettings] = useState(DEFAULT_DICTATION_SETTINGS);
 
   // Imperative resources live in refs — they outlive React renders and
   // must be torn down deterministically when recording stops.
@@ -56,6 +58,7 @@ export default function DictationWidget() {
 
   useEffect(() => {
     void rehydrateTauriGlobals();
+    setSettings(loadDictationSettings());
   }, []);
 
   const update = useCallback((next: DictationState) => {
@@ -81,8 +84,14 @@ export default function DictationWidget() {
       cleanupAudio();
       wsRef.current?.close();
       wsRef.current = null;
-      const text = fullTranscript(finalState);
+      const text = settings.insertTrailingSpace
+        ? `${fullTranscript(finalState)} `
+        : fullTranscript(finalState);
       if (!text) return;
+      if (!settings.autoPaste) {
+        setCopied(false);
+        return;
+      }
       try {
         // Rust side writes the clipboard and hides this window.
         await invokeTauri("dictation_paste", { text });
@@ -93,7 +102,7 @@ export default function DictationWidget() {
         setCopied(false);
       }
     },
-    [cleanupAudio]
+    [cleanupAudio, settings.autoPaste, settings.insertTrailingSpace]
   );
 
   const handleFrame = useCallback(
@@ -127,7 +136,11 @@ export default function DictationWidget() {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        audio: {
+          channelCount: 1,
+          echoCancellation: settings.echoCancellation,
+          noiseSuppression: settings.noiseSuppression,
+        },
       });
     } catch {
       update({
@@ -142,8 +155,11 @@ export default function DictationWidget() {
     const apiUrl = getApiUrl();
     const apiKey = getApiKey();
     const wsBase = apiUrl.replace(/^http/, "ws");
-    const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : "";
-    const ws = new WebSocket(`${wsBase}/api/transcribe/stream${query}`);
+    const query = new URLSearchParams();
+    if (apiKey) query.set("api_key", apiKey);
+    if (settings.language.trim()) query.set("language", settings.language.trim());
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const ws = new WebSocket(`${wsBase}/api/transcribe/stream${suffix}`);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
@@ -180,7 +196,7 @@ export default function DictationWidget() {
       source.connect(processor);
       processor.connect(audioContext.destination);
     };
-  }, [cleanupAudio, handleFrame, update]);
+  }, [cleanupAudio, handleFrame, settings, update]);
 
   useEffect(() => {
     return () => {
@@ -236,18 +252,26 @@ export default function DictationWidget() {
         {listening ? (
           <button
             type="button"
-            onClick={stop}
+            onClick={settings.pushToTalk ? undefined : stop}
+            onMouseUp={settings.pushToTalk ? stop : undefined}
+            onTouchEnd={settings.pushToTalk ? stop : undefined}
             className="flex-1 rounded bg-red-500 px-3 py-1.5 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-red-300"
           >
-            Stop &amp; Copy
+            {settings.autoPaste ? "Stop & Copy" : "Stop"}
           </button>
         ) : (
           <button
             type="button"
-            onClick={() => void start()}
+            onClick={settings.pushToTalk ? undefined : () => void start()}
+            onMouseDown={settings.pushToTalk ? () => void start() : undefined}
+            onTouchStart={settings.pushToTalk ? () => void start() : undefined}
             className="flex-1 rounded bg-emerald-500 px-3 py-1.5 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
           >
-            {state.status === "error" ? "Retry" : "Start Dictation"}
+            {state.status === "error"
+              ? "Retry"
+              : settings.pushToTalk
+                ? "Hold to Dictate"
+                : "Start Dictation"}
           </button>
         )}
       </div>

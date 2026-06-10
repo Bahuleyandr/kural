@@ -14,6 +14,7 @@ export interface BackendStatus {
   voicesError: string | null;
   localModelError: string | null;
   refreshClones: () => Promise<void>;
+  refreshBackend: () => void;
 }
 
 /**
@@ -117,5 +118,6 @@ export function useBackendStatus(apiUrl: string): BackendStatus {
       await refreshClones();
       setReloadTick((tick) => tick + 1);
     },
+    refreshBackend: () => setReloadTick((tick) => tick + 1),
   };
 }

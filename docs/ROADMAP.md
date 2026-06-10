@@ -18,13 +18,20 @@
 - Optional ASR (faster-whisper, Vosk, whisper.cpp) and translation (Argos, IndicTrans2 pack, NLLB) adapters with `/api/local-models`, `/api/transcribe`, `/api/translate`.
 - Expanded SSML subset (pauses, emphasis, prosody fallback, phoneme fallback, pronunciation rules).
 - Advanced audio controls (speed, pitch, volume, normalization, silence trim, pause scaling, format).
+- Model Pack Manager tab with local readiness by workflow, install hints for optional packs, and Kokoro first-run provisioning.
+- Voice Quality Studio for side-by-side style renders, audio comparison, and applying the best control preset.
+- Dubbing Timeline view with segment lanes, ready/overrun signalling, per-segment render, translation, and WAV timeline export.
+- Dictation settings for language hints, push-to-talk, auto-paste, echo cancellation, noise suppression, and trailing-space insertion.
+- Desktop diagnostics panel exposing backend URL, backend runtime status, app data path, audio folder, and backend startup errors.
+- Privacy and safety panel showing local API posture, generated asset footprint, clone consent coverage, and ready local ASR/translation packs.
 - Single Python entrypoint (`desktop/scripts/build_desktop.py`) shared by all four installer/release shell wrappers.
 - Frontend split into `app/components/`, `app/hooks/`, `app/lib/` modules with a Next.js error boundary; `apiFetch` wraps `X-API-Key` injection; `useApi` hook offers abort + 5s cache.
 - A11y pass: skip link, `aria-live` regions for status and errors, `aria-pressed`/`aria-current` on toggle buttons, focus rings on every interactive element.
 
 ## Next
 
-- Multilingual TTS adapter slots beyond Kokoro/Chatterbox (user-provided voice folders).
+- Active install/remove/update flows for non-Kokoro model packs once a safe local package manager contract is defined.
+- Multilingual TTS adapter slots beyond Kokoro/Chatterbox/Supertonic (user-provided voice folders).
 - Full IndicTrans2 inference adapter once a local model-pack layout is finalised.
 - Optional local forced alignment for subtitle timing repair.
 - Published signed desktop installers — pending Windows/macOS signing certificates and a chosen distribution channel.

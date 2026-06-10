@@ -25,6 +25,15 @@ function getTauriInvoke(): TauriGlobal["invoke"] {
   return tauri?.invoke ?? tauri?.core?.invoke;
 }
 
+export interface DesktopDiagnostics {
+  backendUrl: string;
+  apiKeyPresent: boolean;
+  backendRunning: boolean;
+  backendError: string | null;
+  appDataDir: string | null;
+  audioLibraryDir: string | null;
+}
+
 /**
  * After a page reload Tauri's initialization_script does not re-run, so the
  * window globals are gone. Call this once on mount to re-hydrate the API
@@ -66,6 +75,12 @@ export async function revealSavedFile(path: string): Promise<boolean> {
   if (!invoke) return false;
   await invoke("reveal_path", { path });
   return true;
+}
+
+export async function getDesktopDiagnostics(): Promise<DesktopDiagnostics | null> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return null;
+  return (await invoke("get_runtime_diagnostics")) as DesktopDiagnostics;
 }
 
 export async function readApiError(res: Response): Promise<string> {

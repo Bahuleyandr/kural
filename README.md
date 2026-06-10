@@ -1,6 +1,6 @@
 # Kural
 
-Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline. No cloud, no tracking, no subscription required.
+Privacy-first, cross-platform AI text-to-speech and dictation workstation. Runs entirely offline. No cloud, no tracking, no subscription required.
 
 ## TTS Engines
 
@@ -19,7 +19,7 @@ Privacy-first, cross-platform AI text-to-speech platform. Runs entirely offline.
 ```
 kural/
   backend/      # Python FastAPI service wrapping Kokoro, Chatterbox, and Supertonic
-  frontend/     # Next.js creator workspace with projects, dubbing, SSML, and audio library
+  frontend/     # Next.js creator workspace with projects, quality studio, dubbing, SSML, model packs, and audio library
   cli/          # Python Click CLI: kural speak, kural voices
   mcp/          # Model Context Protocol server: drive Kural from Claude Code, Cursor, etc.
   desktop/      # Tauri cross-platform desktop app
@@ -172,6 +172,17 @@ Kural assumes one user per backend process. The Kokoro and Chatterbox engines ar
 The creator UI stores projects locally in IndexedDB. A project can contain script documents, generated audio assets, voice presets, pronunciation profiles, and transcript-file dubbing segments. Use `.kuralproj` export/import when you want a portable offline archive.
 
 Optional ASR/translation runtimes are adapter-driven. Install `backend/requirements-local-models.txt`, provision model packs under the configured cache folders, then check `/api/local-models` before using audio/video import or local translation in the dubbing workspace. See `docs/LOCAL_MODELS.md` for a repeatable local setup.
+
+The workstation tabs are organised around day-to-day creator workflows:
+
+- **Write:** single, batch, SSML, performance style, and advanced audio controls.
+- **Quality:** A/B render the same line across styles and reuse the best settings.
+- **Voices:** engine inventory, cloned voices, and voice import/export.
+- **Models:** local pack readiness, install commands, and Kokoro first-run provisioning.
+- **Dubbing:** subtitle/audio imports, timeline overview, local translation, per-segment render, overrun warnings, and stitched WAV export.
+- **Pronunciation:** ordered language-aware pronunciation rules with preview.
+- **Library:** local generated clips.
+- **Settings:** dictation controls, desktop diagnostics, and privacy/safety posture.
 
 ## Developer commands
 

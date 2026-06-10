@@ -1,0 +1,235 @@
+import { useEffect, useMemo, useState } from "react";
+
+import type { PerformanceStyle } from "../lib/performanceStyles";
+import { applyPerformanceStyle } from "../lib/performanceStyles";
+import type { VoiceOption } from "../lib/types";
+import type { AudioControls, OutputFormat } from "../lib/workspace";
+
+export interface QualityRenderRequest {
+  text: string;
+  voiceKey: string;
+  styleId: string;
+  controls: AudioControls;
+}
+
+export interface QualityResult {
+  id: string;
+  label: string;
+  styleId: string;
+  voiceKey: string;
+  voiceLabel: string;
+  controls: AudioControls;
+  blob: Blob;
+  format: OutputFormat;
+  bytes: number;
+}
+
+export function QualityStudio(props: {
+  defaultText: string;
+  selectedVoiceKey: string;
+  voiceOptions: VoiceOption[];
+  controls: AudioControls;
+  performanceStyles: PerformanceStyle[];
+  onRenderSample: (request: QualityRenderRequest) => Promise<QualityResult>;
+  onUseSample: (result: QualityResult) => void;
+}) {
+  const [text, setText] = useState(
+    props.defaultText.trim() || "Kural should sound natural, steady, and easy to listen to."
+  );
+  const [voiceKey, setVoiceKey] = useState(props.selectedVoiceKey);
+  const [selectedStyleIds, setSelectedStyleIds] = useState<string[]>([
+    "neutral",
+    "natural",
+    "conversational",
+    "warm_narration",
+  ]);
+  const [busyStyleId, setBusyStyleId] = useState("");
+  const [error, setError] = useState("");
+  const [results, setResults] = useState<QualityResult[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!voiceKey && props.selectedVoiceKey) setVoiceKey(props.selectedVoiceKey);
+  }, [props.selectedVoiceKey, voiceKey]);
+
+  useEffect(() => {
+    const nextUrls: Record<string, string> = {};
+    results.forEach((result) => {
+      nextUrls[result.id] = URL.createObjectURL(result.blob);
+    });
+    setUrls(nextUrls);
+    return () => Object.values(nextUrls).forEach((url) => URL.revokeObjectURL(url));
+  }, [results]);
+
+  const selectedVoice = useMemo(
+    () => props.voiceOptions.find((option) => option.key === voiceKey),
+    [props.voiceOptions, voiceKey]
+  );
+
+  async function renderStyle(style: PerformanceStyle) {
+    if (!text.trim()) {
+      setError("Enter comparison text first.");
+      return;
+    }
+    if (!voiceKey) {
+      setError("Choose a voice before rendering a comparison.");
+      return;
+    }
+    setBusyStyleId(style.id);
+    setError("");
+    try {
+      const result = await props.onRenderSample({
+        text: text.trim(),
+        voiceKey,
+        styleId: style.id,
+        controls: applyPerformanceStyle(props.controls, style.id),
+      });
+      setResults((current) => [result, ...current.filter((item) => item.id !== result.id)]);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not render comparison sample.");
+    } finally {
+      setBusyStyleId("");
+    }
+  }
+
+  return (
+    <section className="space-y-4" aria-labelledby="quality-studio-heading">
+      <div className="rounded border border-slate-300 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">A/B testing</p>
+            <h2 id="quality-studio-heading" className="text-lg font-semibold">
+              Voice Quality Studio
+            </h2>
+          </div>
+          <span className="rounded border border-slate-200 px-3 py-1 text-sm">
+            {results.length} sample{results.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <label className="text-sm font-medium">
+            Comparison script
+            <textarea
+              className="mt-2 min-h-36 w-full resize-y rounded border border-slate-300 px-3 py-3 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+            />
+          </label>
+          <div className="space-y-3">
+            <label className="block text-sm font-medium">
+              Voice
+              <select
+                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                value={voiceKey}
+                onChange={(event) => setVoiceKey(event.target.value)}
+              >
+                {props.voiceOptions.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              Current voice: {selectedVoice?.shortLabel || "none selected"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <section className="rounded border border-slate-300 bg-white p-4">
+        <h3 className="font-semibold">Comparison set</h3>
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+          {props.performanceStyles.map((style) => (
+            <label key={style.id} className="flex items-start gap-2 rounded border border-slate-200 p-3 text-sm">
+              <input
+                className="mt-1"
+                type="checkbox"
+                checked={selectedStyleIds.includes(style.id)}
+                onChange={(event) =>
+                  setSelectedStyleIds((current) =>
+                    event.target.checked
+                      ? [...current, style.id]
+                      : current.filter((id) => id !== style.id)
+                  )
+                }
+              />
+              <span>
+                <span className="block font-medium">{style.label}</span>
+                <span className="block text-xs text-slate-500">{style.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {props.performanceStyles
+            .filter((style) => selectedStyleIds.includes(style.id))
+            .map((style) => (
+              <button
+                type="button"
+                key={style.id}
+                className="rounded bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+                disabled={Boolean(busyStyleId)}
+                onClick={() => void renderStyle(style)}
+              >
+                {busyStyleId === style.id ? "Rendering..." : `Render ${style.label}`}
+              </button>
+            ))}
+        </div>
+        {error && (
+          <p className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            {error}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded border border-slate-300 bg-white p-4">
+        <h3 className="font-semibold">Rendered samples</h3>
+        <div className="mt-3 grid gap-3 xl:grid-cols-2">
+          {results.map((result) => (
+            <article key={result.id} className="rounded border border-slate-200 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h4 className="font-medium">{result.label}</h4>
+                  <p className="text-xs text-slate-500">
+                    {result.voiceLabel} / {result.format.toUpperCase()} /{" "}
+                    {(result.bytes / 1024).toFixed(1)} KB
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  onClick={() => props.onUseSample(result)}
+                >
+                  Use Settings
+                </button>
+              </div>
+              {urls[result.id] && (
+                <audio className="mt-3 w-full" controls src={urls[result.id]} />
+              )}
+              <dl className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                <div>
+                  <dt>Speed</dt>
+                  <dd>{result.controls.speed.toFixed(2)}</dd>
+                </div>
+                <div>
+                  <dt>Pitch</dt>
+                  <dd>{result.controls.pitchSemitones.toFixed(1)} st</dd>
+                </div>
+                <div>
+                  <dt>Pauses</dt>
+                  <dd>{result.controls.pauseScale.toFixed(2)}x</dd>
+                </div>
+              </dl>
+            </article>
+          ))}
+          {results.length === 0 && (
+            <p className="rounded border border-slate-200 p-4 text-sm text-slate-500">
+              Render a few styles to compare voice, pacing, loudness, and pauses side by side.
+            </p>
+          )}
+        </div>
+      </section>
+    </section>
+  );
+}

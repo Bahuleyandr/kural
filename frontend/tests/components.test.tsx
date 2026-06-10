@@ -5,9 +5,14 @@ import userEvent from "@testing-library/user-event";
 import { AudioLibrary } from "../app/components/AudioLibrary";
 import { ClonePanel } from "../app/components/ClonePanel";
 import { LocalModelPanel } from "../app/components/LocalModelPanel";
+import { ModelPackManager } from "../app/components/ModelPackManager";
+import { QualityStudio } from "../app/components/QualityStudio";
+import { SettingsView } from "../app/components/SettingsView";
 import { TtsEnginePanel } from "../app/components/TtsEnginePanel";
 import { SetupBanner } from "../app/components/SetupBanner";
-import type { AudioAsset } from "../app/lib/workspace";
+import { WorkspaceTabs } from "../app/components/WorkspaceTabs";
+import { PERFORMANCE_STYLES } from "../app/lib/performanceStyles";
+import { DEFAULT_CONTROLS, type AudioAsset } from "../app/lib/workspace";
 
 describe("AudioLibrary", () => {
   it("shows the empty state when no clips exist", () => {
@@ -96,6 +101,136 @@ describe("LocalModelPanel", () => {
   it("surfaces an error message", () => {
     render(<LocalModelPanel models={[]} error="boom" />);
     expect(screen.getByRole("alert")).toHaveTextContent("boom");
+  });
+});
+
+describe("ModelPackManager", () => {
+  it("shows all local pack categories and can start Kokoro provisioning", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ kokoro_ready: false }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <ModelPackManager
+        apiUrl="http://backend"
+        error={null}
+        onRefresh={() => undefined}
+        models={[
+          {
+            id: "kokoro-v1-onnx",
+            name: "Kokoro v1.0 ONNX",
+            category: "tts",
+            provider: "kokoro",
+            status: "not_configured",
+          },
+          {
+            id: "faster-whisper",
+            name: "faster-whisper",
+            category: "asr",
+            provider: "faster-whisper",
+            status: "ready",
+          },
+          {
+            id: "argos-translate",
+            name: "Argos Translate",
+            category: "translation",
+            provider: "argos",
+            status: "not_installed",
+          },
+        ]}
+      />
+    );
+    expect(screen.getByRole("heading", { name: /model pack manager/i })).toBeInTheDocument();
+    expect(screen.getByText(/tts packs/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /download kokoro pack/i }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend/api/setup/provision-models",
+      expect.objectContaining({ method: "POST" })
+    );
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("WorkspaceTabs", () => {
+  it("includes the expanded workstation views", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    render(<WorkspaceTabs activeView="write" onViewChange={onViewChange} />);
+    expect(screen.getByRole("button", { name: "quality" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "models" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "settings" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "quality" }));
+    expect(onViewChange).toHaveBeenCalledWith("quality");
+  });
+});
+
+describe("QualityStudio", () => {
+  it("renders a comparison sample and exposes it for reuse", async () => {
+    const user = userEvent.setup();
+    const onUseSample = vi.fn();
+    const blob = new Blob([new Uint8Array(8)], { type: "audio/wav" });
+    const createObjectURL = vi.fn(() => "blob:quality");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    render(
+      <QualityStudio
+        controls={DEFAULT_CONTROLS}
+        defaultText="Hello"
+        performanceStyles={PERFORMANCE_STYLES.slice(0, 2)}
+        selectedVoiceKey="kokoro:af_bella"
+        voiceOptions={[
+          {
+            key: "kokoro:af_bella",
+            id: "af_bella",
+            kind: "kokoro",
+            label: "[Kokoro] Bella",
+            shortLabel: "Bella",
+            language: "en-US",
+          },
+        ]}
+        onRenderSample={async (request) => ({
+          id: "sample-1",
+          label: "Neutral",
+          styleId: request.styleId,
+          voiceKey: request.voiceKey,
+          voiceLabel: "Bella",
+          controls: request.controls,
+          blob,
+          format: "wav",
+          bytes: 8,
+        })}
+        onUseSample={onUseSample}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: /render neutral/i }));
+    expect(await screen.findByText("1 sample")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /use settings/i }));
+    expect(onUseSample).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("SettingsView", () => {
+  it("groups dictation, release diagnostics, and privacy panels", () => {
+    render(
+      <SettingsView
+        apiUrl="http://127.0.0.1:8000"
+        assets={[]}
+        backendError={null}
+        backendStatus="kokoro 0.2.0"
+        clones={[]}
+        models={[]}
+      />
+    );
+    expect(screen.getByRole("heading", { name: /dictation settings/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /desktop release diagnostics/i })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /privacy and safety/i })).toBeInTheDocument();
   });
 });
 

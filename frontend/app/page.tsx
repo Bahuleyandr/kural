@@ -5,9 +5,18 @@ import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "rea
 import { AudioLibrary } from "./components/AudioLibrary";
 import { ClonePanel } from "./components/ClonePanel";
 import { ControlPanel } from "./components/ControlPanel";
+import { DubbingTimeline } from "./components/DubbingTimeline";
 import { LocalModelPanel } from "./components/LocalModelPanel";
+import { ModelPackManager } from "./components/ModelPackManager";
+import {
+  QualityStudio,
+  type QualityRenderRequest,
+  type QualityResult,
+} from "./components/QualityStudio";
+import { SettingsView } from "./components/SettingsView";
 import { TtsEnginePanel } from "./components/TtsEnginePanel";
 import { SetupBanner } from "./components/SetupBanner";
+import { WorkspaceTabs } from "./components/WorkspaceTabs";
 import { useBackendStatus } from "./hooks/useBackendStatus";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { apiFetch, getApiUrl, readApiError, rehydrateTauriGlobals } from "./lib/api";
@@ -26,6 +35,7 @@ import { formatTime, parseTranscript } from "./lib/dubbing";
 import {
   PERFORMANCE_STYLES,
   applyPerformanceStyle,
+  getPerformanceStyle,
   prepareTextForPerformance,
 } from "./lib/performanceStyles";
 import type { Mode, TranscriptionResponse, VoiceKind, WorkspaceView } from "./lib/types";
@@ -65,6 +75,7 @@ export default function Home() {
     voicesError,
     localModelError,
     refreshClones,
+    refreshBackend,
   } = useBackendStatus(apiUrl);
 
   const {
@@ -374,6 +385,67 @@ export default function Home() {
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  async function renderQualitySample(request: QualityRenderRequest): Promise<QualityResult> {
+    if (!activeProject || !activeProfile) throw new Error("Workspace is still loading");
+    const selected = parseVoiceKey(request.voiceKey);
+    const prepared = prepareTextForPerformance(request.text, request.styleId, false);
+    const body = {
+      text: prepared.text,
+      voice: selected.kind === "clone" ? "af_bella" : selected.id,
+      voice_id: selected.kind === "clone" ? selected.id : undefined,
+      speed: request.controls.speed,
+      format: request.controls.format,
+      ssml: prepared.ssml,
+      controls: toApiControls(request.controls),
+      pronunciation_rules: toApiRules(activeProfile.rules),
+      language: activeProject.targetLanguage,
+    };
+    const res = await apiFetch(`${apiUrl}/api/synthesize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await readApiError(res));
+    const blob = await res.blob();
+    const isMp3 = (res.headers.get("content-type") || "").includes("mpeg");
+    const format: OutputFormat = isMp3 ? "mp3" : request.controls.format;
+    const style = getPerformanceStyle(request.styleId);
+    const asset: AudioAsset = {
+      id: createId("asset"),
+      projectId: activeProject.id,
+      name: `Quality ${style.label}`,
+      text: request.text,
+      voiceLabel: selectedVoiceLabel(request.voiceKey),
+      format,
+      createdAt: new Date().toISOString(),
+      bytes: blob.size,
+      blob,
+      language: activeProject.targetLanguage,
+      controls: request.controls,
+    };
+    await saveAudioAsset(asset);
+    setAssets((current) => [asset, ...current]);
+    return {
+      id: asset.id,
+      label: style.label,
+      styleId: request.styleId,
+      voiceKey: request.voiceKey,
+      voiceLabel: asset.voiceLabel,
+      controls: request.controls,
+      blob,
+      format,
+      bytes: blob.size,
+    };
+  }
+
+  function useQualitySample(result: QualityResult) {
+    setSelectedVoiceKey(result.voiceKey);
+    setControls(result.controls);
+    setPerformanceStyleId(result.styleId);
+    setSuccess(`Applied ${result.label} settings from Quality Studio.`);
+    setActiveView("write");
   }
 
   function updatePronunciationProfile(profile: PronunciationProfile) {
@@ -935,25 +1007,7 @@ export default function Home() {
                   />
                 </label>
               </div>
-              <nav className="flex flex-wrap gap-2" aria-label="Workspace views">
-                {(["write", "voices", "dubbing", "pronunciation", "library"] as WorkspaceView[]).map(
-                  (view) => (
-                    <button
-                      type="button"
-                      key={view}
-                      aria-pressed={activeView === view}
-                      className={`rounded border px-3 py-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-slate-400 ${
-                        activeView === view
-                          ? "border-slate-950 bg-slate-950 text-white"
-                          : "border-slate-300"
-                      }`}
-                      onClick={() => setActiveView(view)}
-                    >
-                      {view}
-                    </button>
-                  )
-                )}
-              </nav>
+              <WorkspaceTabs activeView={activeView} onViewChange={setActiveView} />
             </div>
 
             {activeView === "write" && (!activeProject || !activeDocument) && (
@@ -1111,6 +1165,20 @@ export default function Home() {
               </div>
             )}
 
+            {activeView === "quality" && activeProject && activeDocument && (
+              <div className="p-4">
+                <QualityStudio
+                  controls={controls}
+                  defaultText={activeDocument.text}
+                  performanceStyles={PERFORMANCE_STYLES}
+                  selectedVoiceKey={selectedVoiceKey}
+                  voiceOptions={voiceOptions}
+                  onRenderSample={renderQualitySample}
+                  onUseSample={useQualitySample}
+                />
+              </div>
+            )}
+
             {activeView === "voices" && (
               <div className="space-y-4 p-4">
                 <TtsEnginePanel models={localModels} error={localModelError} />
@@ -1208,6 +1276,17 @@ export default function Home() {
               </div>
             )}
 
+            {activeView === "models" && (
+              <div className="p-4">
+                <ModelPackManager
+                  models={localModels}
+                  error={localModelError}
+                  apiUrl={apiUrl}
+                  onRefresh={refreshBackend}
+                />
+              </div>
+            )}
+
             {activeView === "dubbing" && !activeProject && (
               <div className="p-4 text-sm text-slate-500" role="status" aria-live="polite">
                 Loading workspace...
@@ -1215,187 +1294,25 @@ export default function Home() {
             )}
 
             {activeView === "dubbing" && activeProject && (
-              <div className="space-y-4 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-slate-400">
-                    Import SRT/VTT/CSV/Text
-                    <input
-                      className="hidden"
-                      type="file"
-                      accept=".srt,.vtt,.csv,.txt"
-                      onChange={importTranscriptFile}
-                    />
-                  </label>
-                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-slate-400">
-                    Import Audio/Video
-                    <input
-                      className="hidden"
-                      type="file"
-                      accept="audio/*,video/mp4,video/quicktime"
-                      onChange={transcribeMediaFile}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
-                    disabled={isTranslating || activeProject.dubbingSegments.length === 0}
-                    onClick={() => void translateAllSegments()}
-                    aria-busy={isTranslating}
-                  >
-                    {isTranslating ? "Translating..." : "Translate All"}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-                    onClick={exportDubbingTimeline}
-                  >
-                    Export WAV Timeline
-                  </button>
-                  <span className="text-sm text-slate-500" role="status" aria-live="polite">
-                    {isTranscribing
-                      ? "Transcribing..."
-                      : `${activeProject?.dubbingSegments.length || 0} transcript segments`}
-                  </span>
-                </div>
-                <LocalModelPanel models={localModels} error={localModelError} />
-
-                <div className="space-y-3">
-                  {activeProject?.dubbingSegments.map((segment, index) => {
-                    const asset = assets.find(
-                      (candidate) => candidate.id === segment.audioAssetId
-                    );
-                    const duration = segment.audioAssetId
-                      ? assetDurations[segment.audioAssetId] || 0
-                      : 0;
-                    const limit = segment.endMs - segment.startMs;
-                    const overrun = duration > 0 && duration > limit;
-                    return (
-                      <section
-                        key={segment.id}
-                        className="rounded border border-slate-300 p-3"
-                        aria-label={`Segment ${index + 1}`}
-                      >
-                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <h3 className="font-medium">
-                              Segment {index + 1} - {formatTime(segment.startMs)}
-                            </h3>
-                            <p className="text-xs text-slate-500">
-                              Target {formatTime(segment.endMs)} {overrun ? "- overrun" : ""}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
-                              disabled={isTranslating}
-                              onClick={() => void translateSegment(segment)}
-                            >
-                              Translate
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
-                              disabled={segment.status === "rendering"}
-                              onClick={() => void renderSegment(segment)}
-                              aria-busy={segment.status === "rendering"}
-                            >
-                              {segment.status === "rendering" ? "Rendering..." : "Render Segment"}
-                            </button>
-                          </div>
-                        </div>
-                        <div className="grid gap-3 lg:grid-cols-2">
-                          <label className="text-sm">
-                            Source text
-                            <textarea
-                              className="mt-1 min-h-28 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-                              value={segment.sourceText}
-                              onChange={(event) =>
-                                updateSegment(segment.id, { sourceText: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label className="text-sm">
-                            Target text
-                            <textarea
-                              className="mt-1 min-h-28 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-                              value={segment.targetText}
-                              onChange={(event) =>
-                                updateSegment(segment.id, { targetText: event.target.value })
-                              }
-                            />
-                          </label>
-                        </div>
-                        <div className="mt-3 grid gap-2 md:grid-cols-4">
-                          <label className="sr-only" htmlFor={`segment-voice-${segment.id}`}>
-                            Voice for segment {index + 1}
-                          </label>
-                          <select
-                            id={`segment-voice-${segment.id}`}
-                            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-                            value={segment.voiceId || selectedVoiceKey}
-                            onChange={(event) =>
-                              updateSegment(segment.id, { voiceId: event.target.value })
-                            }
-                          >
-                            {voiceOptions.map((option) => (
-                              <option key={option.key} value={option.key}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-                            type="number"
-                            min={0.5}
-                            max={2}
-                            step={0.05}
-                            value={segment.controls.speed}
-                            aria-label={`Speed for segment ${index + 1}`}
-                            onChange={(event) =>
-                              updateSegment(segment.id, {
-                                controls: { ...segment.controls, speed: Number(event.target.value) },
-                              })
-                            }
-                          />
-                          <input
-                            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-                            value={segment.notes}
-                            onChange={(event) =>
-                              updateSegment(segment.id, { notes: event.target.value })
-                            }
-                            placeholder="Notes"
-                            aria-label={`Notes for segment ${index + 1}`}
-                          />
-                          <span
-                            className="rounded border border-slate-200 px-3 py-2 text-sm"
-                            aria-live="polite"
-                          >
-                            {segment.status}
-                          </span>
-                        </div>
-                        {asset && audioUrls[asset.id] && (
-                          <audio
-                            className="mt-3 w-full"
-                            controls
-                            src={audioUrls[asset.id]}
-                            aria-label={`Rendered audio for segment ${index + 1}`}
-                          />
-                        )}
-                        {segment.error && (
-                          <p className="mt-2 text-sm text-red-700" role="alert">
-                            {segment.error}
-                          </p>
-                        )}
-                      </section>
-                    );
-                  })}
-                  {activeProject?.dubbingSegments.length === 0 && (
-                    <p className="rounded border border-slate-200 p-4 text-sm text-slate-500">
-                      Import a transcript file to start a local dubbing workflow.
-                    </p>
-                  )}
-                </div>
+              <div className="p-4">
+                <DubbingTimeline
+                  assetDurations={assetDurations}
+                  assets={assets}
+                  audioUrls={audioUrls}
+                  isTranscribing={isTranscribing}
+                  isTranslating={isTranslating}
+                  localModelPanel={<LocalModelPanel models={localModels} error={localModelError} />}
+                  selectedVoiceKey={selectedVoiceKey}
+                  segments={activeProject.dubbingSegments}
+                  voiceOptions={voiceOptions}
+                  onExportTimeline={exportDubbingTimeline}
+                  onImportMedia={transcribeMediaFile}
+                  onImportTranscript={importTranscriptFile}
+                  onRenderSegment={(segment) => void renderSegment(segment)}
+                  onTranslateAll={() => void translateAllSegments()}
+                  onTranslateSegment={(segment) => void translateSegment(segment)}
+                  onUpdateSegment={updateSegment}
+                />
               </div>
             )}
 
@@ -1546,6 +1463,19 @@ export default function Home() {
                   assets={assets}
                   audioUrls={audioUrls}
                   onDelete={(id) => void deleteAsset(id)}
+                />
+              </div>
+            )}
+
+            {activeView === "settings" && (
+              <div className="p-4">
+                <SettingsView
+                  apiUrl={apiUrl}
+                  assets={assets}
+                  backendError={backendError}
+                  backendStatus={backendStatus}
+                  clones={clones}
+                  models={localModels}
                 />
               </div>
             )}

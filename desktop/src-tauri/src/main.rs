@@ -26,6 +26,21 @@ const DICTATION_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 struct BackendProcess(Mutex<Option<Child>>);
 struct BackendPort(u16);
 struct BackendApiKey(String);
+struct BackendStartupError(Option<String>);
+struct RuntimePaths {
+    app_data_dir: Option<PathBuf>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeDiagnostics {
+    backend_url: String,
+    api_key_present: bool,
+    backend_running: bool,
+    backend_error: Option<String>,
+    app_data_dir: Option<String>,
+    audio_library_dir: Option<String>,
+}
 
 // ── API key (per-install shared secret) ─────────────────────────────────────
 
@@ -354,6 +369,34 @@ fn get_api_key(key: tauri::State<BackendApiKey>) -> String {
     key.0.clone()
 }
 
+#[tauri::command]
+fn get_runtime_diagnostics(
+    process: tauri::State<BackendProcess>,
+    port: tauri::State<BackendPort>,
+    key: tauri::State<BackendApiKey>,
+    startup_error: tauri::State<BackendStartupError>,
+    paths: tauri::State<RuntimePaths>,
+) -> RuntimeDiagnostics {
+    let backend_running = process
+        .0
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false);
+    RuntimeDiagnostics {
+        backend_url: format!("http://127.0.0.1:{}", port.0),
+        api_key_present: !key.0.is_empty(),
+        backend_running,
+        backend_error: startup_error.0.clone(),
+        app_data_dir: paths
+            .app_data_dir
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        audio_library_dir: default_audio_library_dir()
+            .ok()
+            .map(|path| path.display().to_string()),
+    }
+}
+
 fn default_audio_library_dir() -> Result<PathBuf, String> {
     let home = if cfg!(windows) {
         env::var_os("USERPROFILE")
@@ -577,7 +620,7 @@ fn main() {
                 })
                 .unwrap_or_default();
 
-            let (child_opt, backend_error) = match start_backend(port, &api_key, resource_dir, app_data_dir) {
+            let (child_opt, backend_error) = match start_backend(port, &api_key, resource_dir, app_data_dir.clone()) {
                 Ok(mut child) => match wait_for_backend(port, &mut child, Duration::from_secs(15)) {
                     Ok(()) => (Some(child), None),
                     Err(e) => {
@@ -595,6 +638,8 @@ fn main() {
             app.manage(BackendProcess(Mutex::new(child_opt)));
             app.manage(BackendPort(port));
             app.manage(BackendApiKey(api_key.clone()));
+            app.manage(BackendStartupError(backend_error.clone()));
+            app.manage(RuntimePaths { app_data_dir });
 
             // App menu (macOS menu bar; also used on Linux/Windows)
             let menu = build_menu(app.handle())?;
@@ -687,6 +732,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_backend_url,
             get_api_key,
+            get_runtime_diagnostics,
             save_audio_file,
             reveal_path,
             dictation_paste
