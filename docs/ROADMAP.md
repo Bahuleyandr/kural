@@ -18,21 +18,26 @@
 - Optional ASR (faster-whisper, Vosk, whisper.cpp) and translation (Argos, IndicTrans2 pack, NLLB) adapters with `/api/local-models`, `/api/transcribe`, `/api/translate`.
 - Expanded SSML subset (pauses, emphasis, prosody fallback, phoneme fallback, pronunciation rules).
 - Advanced audio controls (speed, pitch, volume, normalization, silence trim, pause scaling, format).
-- Model Pack Manager tab with local readiness by workflow, install hints for optional packs, and Kokoro first-run provisioning.
-- Voice Quality Studio for side-by-side style renders, audio comparison, and applying the best control preset.
-- Dubbing Timeline view with segment lanes, ready/overrun signalling, per-segment render, translation, and WAV timeline export.
+- Model Pack Manager v2 with local readiness by workflow and safe backend job APIs for install/update/remove where Kural owns the model folder.
+- Voice Quality Studio for side-by-side style renders, waveform/loudness inspection, notes, favourites, and applying the best control preset.
+- First-run Public Beta setup wizard covering local engine, Kokoro, clone runtime, offline dubbing packs, microphone permission, and sample project creation.
+- Dubbing Timeline view with speaker lanes, ready/overrun signalling, media transcription imports, per-segment render, translation, alignment checks, retry/render-all actions, transcript export, and WAV timeline export.
 - Dictation settings for language hints, push-to-talk, auto-paste, echo cancellation, noise suppression, and trailing-space insertion.
-- Desktop diagnostics panel exposing backend URL, backend runtime status, app data path, audio folder, and backend startup errors.
-- Privacy and safety panel showing local API posture, generated asset footprint, clone consent coverage, and ready local ASR/translation packs.
+- Desktop diagnostics panel exposing local engine URL, runtime status, app data path, audio folder, startup errors, restart action, and logs-folder action.
+- Project Vault panel for local project search/tag/archive/duplicate posture and storage usage.
+- Privacy and safety panel showing local API posture, provenance sidecars, generated asset footprint, clone consent ledger, and ready local ASR/translation packs.
+- CLI/MCP read-only model-pack inventory.
 - Single Python entrypoint (`desktop/scripts/build_desktop.py`) shared by all four installer/release shell wrappers.
 - Frontend split into `app/components/`, `app/hooks/`, `app/lib/` modules with a Next.js error boundary; `apiFetch` wraps `X-API-Key` injection; `useApi` hook offers abort + 5s cache.
 - A11y pass: skip link, `aria-live` regions for status and errors, `aria-pressed`/`aria-current` on toggle buttons, focus rings on every interactive element.
 
 ## Next
 
-- Active install/remove/update flows for non-Kokoro model packs once a safe local package manager contract is defined.
+- Persisted desktop project vault on disk in addition to IndexedDB, with user-selected vault folder and recent-project tracking.
+- Full media export with muxed MP4 when ffmpeg is available.
+- Tauri updater signature validation in the release pipeline and OS signing once certificates are available.
 - Multilingual TTS adapter slots beyond Kokoro/Chatterbox/Supertonic (user-provided voice folders).
 - Full IndicTrans2 inference adapter once a local model-pack layout is finalised.
-- Optional local forced alignment for subtitle timing repair.
+- Stronger local forced alignment and subtitle retiming tools.
 - Published signed desktop installers — pending Windows/macOS signing certificates and a chosen distribution channel.
 - Upstream the manual rate-limit overrides in tests with a slowapi-aware fixture in `slowapi` itself.

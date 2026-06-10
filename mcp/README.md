@@ -13,14 +13,16 @@ running Kural backend over HTTP and never loads TTS/ASR models itself.
 |------|--------------|
 | `list_voices` | List Kokoro and Supertonic voices, filterable by engine or language |
 | `list_cloned_voices` | List cloned voices saved in the backend |
+| `list_model_packs` | Read-only model-pack inventory with optional category filtering |
 | `synthesize` | Synthesize text to a WAV/MP3 file with a built-in voice |
 | `synthesize_with_cloned_voice` | Synthesize text using an existing cloned voice |
 | `transcribe` | Transcribe a local audio/video file with offline ASR |
 
-Voice **cloning** is intentionally not exposed — creating a cloned voice
-is consent-gated in Kural and stays a deliberate human action in the
-desktop app or CLI. This server can *use* existing clones but never
-creates them.
+Voice **cloning** and model installation are intentionally not exposed as
+MCP write actions. Creating a cloned voice is consent-gated in Kural and
+stays a deliberate human action in the desktop app or CLI. Model
+downloads can involve large files or license gates, so MCP can inspect
+inventory but cannot install or remove packs.
 
 ## Installation
 

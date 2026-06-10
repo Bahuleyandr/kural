@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { parseTranscript } from "../app/lib/dubbing";
+import {
+  exportSegmentsAsCsv,
+  exportSegmentsAsSrt,
+  exportSegmentsAsVtt,
+  parseTranscript,
+} from "../app/lib/dubbing";
 
 describe("parseTranscript", () => {
   test("imports SRT caption blocks", () => {
@@ -15,6 +20,7 @@ describe("parseTranscript", () => {
     expect(segments[0]).toMatchObject({
       startMs: 1000,
       endMs: 3500,
+      speaker: "Speaker 1",
       sourceText: "Hello world",
       targetLanguage: "hi-IN",
       status: "draft",
@@ -38,5 +44,24 @@ describe("parseTranscript", () => {
 
     expect(segments).toHaveLength(2);
     expect(segments[1].startMs).toBe(3000);
+  });
+});
+
+describe("dubbing transcript export", () => {
+  test("exports segments as SRT, VTT, and CSV", () => {
+    const [segment] = parseTranscript("scene.txt", "Hello world", "en-US", "en-US");
+    const ready = {
+      ...segment,
+      speaker: "Narrator",
+      targetText: "Namaste world",
+      voiceId: "kokoro:af_bella",
+      status: "ready" as const,
+      notes: "ok",
+    };
+
+    expect(exportSegmentsAsSrt([ready])).toContain("00:00:00,000 -->");
+    expect(exportSegmentsAsVtt([ready])).toMatch(/^WEBVTT/);
+    expect(exportSegmentsAsCsv([ready])).toContain('"Narrator"');
+    expect(exportSegmentsAsCsv([ready])).toContain('"Namaste world"');
   });
 });

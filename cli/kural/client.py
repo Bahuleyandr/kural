@@ -48,6 +48,14 @@ def list_clones(host: str = DEFAULT_HOST) -> list[dict]:
         return resp.json()["clones"]
 
 
+def list_model_packs(host: str = DEFAULT_HOST) -> dict:
+    """Return local model-pack inventory from GET /api/model-packs."""
+    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+        resp = client.get("/api/model-packs")
+        resp.raise_for_status()
+        return resp.json()
+
+
 def clone_voice(
     audio_path: str | Path,
     name: str,

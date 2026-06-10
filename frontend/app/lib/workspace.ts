@@ -60,6 +60,7 @@ export interface DubbingSegment {
   id: string;
   startMs: number;
   endMs: number;
+  speaker: string;
   sourceText: string;
   targetText: string;
   sourceLanguage: string;
@@ -70,12 +71,23 @@ export interface DubbingSegment {
   audioAssetId?: string;
   notes: string;
   error?: string;
+  alignment?: {
+    provider: string;
+    durationMs: number;
+    overrunMs: number;
+    words: Array<{ text: string; startMs: number; endMs: number; probability?: number | null }>;
+    checkedAt: string;
+  };
 }
 
 export interface KuralProject {
   id: string;
   name: string;
   description: string;
+  tags: string[];
+  archived: boolean;
+  vaultPath?: string;
+  lastOpenedAt?: string;
   sourceLanguage: string;
   targetLanguage: string;
   createdAt: string;
@@ -235,6 +247,8 @@ export function createProject(name = "Untitled project"): KuralProject {
     id: createId("project"),
     name,
     description: "",
+    tags: [],
+    archived: false,
     sourceLanguage: "en-US",
     targetLanguage: "en-US",
     createdAt,
@@ -253,6 +267,23 @@ export function createProject(name = "Untitled project"): KuralProject {
     voicePresets: [],
     pronunciationProfiles: [profile],
     dubbingSegments: [],
+  };
+}
+
+function normalizeProject(project: KuralProject): KuralProject {
+  return {
+    ...project,
+    tags: project.tags || [],
+    archived: Boolean(project.archived),
+    documents: project.documents || [],
+    voicePresets: project.voicePresets || [],
+    pronunciationProfiles: project.pronunciationProfiles || [createDefaultPronunciationProfile()],
+    dubbingSegments: (project.dubbingSegments || []).map((segment) => ({
+      ...segment,
+      speaker: segment.speaker || "Speaker 1",
+      controls: segment.controls || { ...DEFAULT_CONTROLS, format: "wav" },
+      notes: segment.notes || "",
+    })),
   };
 }
 
@@ -348,7 +379,7 @@ async function migrateLegacyHistory(projectId: string): Promise<void> {
 }
 
 export async function loadWorkspace(): Promise<WorkspaceState> {
-  let projects = await getAll<KuralProject>(PROJECT_STORE);
+  let projects = (await getAll<KuralProject>(PROJECT_STORE)).map(normalizeProject);
   if (projects.length === 0) {
     const inbox = createProject("Inbox");
     await saveProject(inbox);

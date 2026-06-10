@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     # Optional offline model packs for multilingual dubbing.
     # Kural never downloads these implicitly; point these at local model folders
     # after provisioning packs outside the app bundle.
+    model_pack_root: str = "~/.cache/kural"
     local_asr_engine: str = "auto"
     local_translation_engine: str = "auto"
     transcribe_max_upload_mb: int = 250

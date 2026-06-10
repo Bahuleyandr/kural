@@ -24,6 +24,62 @@ export interface QualityResult {
   bytes: number;
 }
 
+interface AudioAnalysis {
+  duration: number;
+  peak: number;
+  rms: number;
+  bars: number[];
+}
+
+async function analyzeAudio(blob: Blob): Promise<AudioAnalysis> {
+  const context = new AudioContext();
+  try {
+    const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+    const channel = buffer.getChannelData(0);
+    let peak = 0;
+    let sum = 0;
+    const bars: number[] = [];
+    const step = Math.max(1, Math.floor(channel.length / 48));
+    for (let i = 0; i < channel.length; i += 1) {
+      const value = Math.abs(channel[i]);
+      peak = Math.max(peak, value);
+      sum += value * value;
+    }
+    for (let i = 0; i < channel.length; i += step) {
+      let localPeak = 0;
+      for (let j = i; j < Math.min(channel.length, i + step); j += 1) {
+        localPeak = Math.max(localPeak, Math.abs(channel[j]));
+      }
+      bars.push(localPeak);
+    }
+    return {
+      duration: buffer.duration,
+      peak,
+      rms: Math.sqrt(sum / Math.max(1, channel.length)),
+      bars,
+    };
+  } finally {
+    await context.close();
+  }
+}
+
+function WaveformPreview({ analysis }: { analysis?: AudioAnalysis }) {
+  const bars = analysis?.bars?.length ? analysis.bars : Array.from({ length: 48 }, () => 0.08);
+  const max = Math.max(0.01, ...bars);
+  return (
+    <div className="mt-3 flex h-16 items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2">
+      {bars.map((bar, index) => (
+        <span
+          // eslint-disable-next-line react/no-array-index-key
+          key={index}
+          className="w-full rounded bg-emerald-600"
+          style={{ height: `${Math.max(8, (bar / max) * 56)}px` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function QualityStudio(props: {
   defaultText: string;
   selectedVoiceKey: string;
@@ -47,6 +103,9 @@ export function QualityStudio(props: {
   const [error, setError] = useState("");
   const [results, setResults] = useState<QualityResult[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const [analysis, setAnalysis] = useState<Record<string, AudioAnalysis>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [favorites, setFavorites] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!voiceKey && props.selectedVoiceKey) setVoiceKey(props.selectedVoiceKey);
@@ -59,6 +118,32 @@ export function QualityStudio(props: {
     });
     setUrls(nextUrls);
     return () => Object.values(nextUrls).forEach((url) => URL.revokeObjectURL(url));
+  }, [results]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      const entries = await Promise.all(
+        results.map(async (result) => {
+          try {
+            return [result.id, await analyzeAudio(result.blob)] as const;
+          } catch {
+            return [result.id, undefined] as const;
+          }
+        })
+      );
+      if (!cancelled) {
+        const next: Record<string, AudioAnalysis> = {};
+        entries.forEach(([id, value]) => {
+          if (value) next[id] = value;
+        });
+        setAnalysis(next);
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [results]);
 
   const selectedVoice = useMemo(
@@ -203,10 +288,28 @@ export function QualityStudio(props: {
                 >
                   Use Settings
                 </button>
+                <button
+                  type="button"
+                  className={`rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                    favorites[result.id]
+                      ? "border-amber-300 bg-amber-50 text-amber-800"
+                      : "border-slate-300"
+                  }`}
+                  aria-pressed={Boolean(favorites[result.id])}
+                  onClick={() =>
+                    setFavorites((current) => ({
+                      ...current,
+                      [result.id]: !current[result.id],
+                    }))
+                  }
+                >
+                  Favorite
+                </button>
               </div>
               {urls[result.id] && (
                 <audio className="mt-3 w-full" controls src={urls[result.id]} />
               )}
+              <WaveformPreview analysis={analysis[result.id]} />
               <dl className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
                 <div>
                   <dt>Speed</dt>
@@ -220,7 +323,30 @@ export function QualityStudio(props: {
                   <dt>Pauses</dt>
                   <dd>{result.controls.pauseScale.toFixed(2)}x</dd>
                 </div>
+                <div>
+                  <dt>Duration</dt>
+                  <dd>{analysis[result.id]?.duration.toFixed(2) || "-"}s</dd>
+                </div>
+                <div>
+                  <dt>Peak</dt>
+                  <dd>{analysis[result.id] ? `${Math.round(analysis[result.id].peak * 100)}%` : "-"}</dd>
+                </div>
+                <div>
+                  <dt>Noise/RMS</dt>
+                  <dd>{analysis[result.id] ? `${Math.round(analysis[result.id].rms * 100)}%` : "-"}</dd>
+                </div>
               </dl>
+              <label className="mt-3 block text-xs font-medium text-slate-600">
+                Notes
+                <textarea
+                  className="mt-1 min-h-16 w-full rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  value={notes[result.id] || ""}
+                  onChange={(event) =>
+                    setNotes((current) => ({ ...current, [result.id]: event.target.value }))
+                  }
+                  placeholder="What sounds best or needs another pass?"
+                />
+              </label>
             </article>
           ))}
           {results.length === 0 && (

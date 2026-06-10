@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { AudioLibrary } from "../app/components/AudioLibrary";
 import { ClonePanel } from "../app/components/ClonePanel";
+import { FirstRunWizard } from "../app/components/FirstRunWizard";
 import { LocalModelPanel } from "../app/components/LocalModelPanel";
 import { ModelPackManager } from "../app/components/ModelPackManager";
 import { QualityStudio } from "../app/components/QualityStudio";
@@ -12,7 +13,11 @@ import { TtsEnginePanel } from "../app/components/TtsEnginePanel";
 import { SetupBanner } from "../app/components/SetupBanner";
 import { WorkspaceTabs } from "../app/components/WorkspaceTabs";
 import { PERFORMANCE_STYLES } from "../app/lib/performanceStyles";
-import { DEFAULT_CONTROLS, type AudioAsset } from "../app/lib/workspace";
+import {
+  DEFAULT_CONTROLS,
+  createProject,
+  type AudioAsset,
+} from "../app/lib/workspace";
 
 describe("AudioLibrary", () => {
   it("shows the empty state when no clips exist", () => {
@@ -107,12 +112,94 @@ describe("LocalModelPanel", () => {
 describe("ModelPackManager", () => {
   it("shows all local pack categories and can start Kokoro provisioning", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ kokoro_ready: false }), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/model-packs") && !init?.method) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              packs: [
+                {
+                  id: "kokoro-v1-onnx",
+                  name: "Kokoro v1.0 ONNX",
+                  category: "tts",
+                  provider: "kokoro",
+                  status: "not_configured",
+                  version: "1.0",
+                  source_url: null,
+                  checksum: null,
+                  license: "Apache-2.0",
+                  disk_size_mb: 92,
+                  installed_path: "/models/kokoro",
+                  languages: ["en-US"],
+                  capabilities: ["tts"],
+                  requires_confirmation: false,
+                  non_commercial: false,
+                  detail: null,
+                  actions: ["install"],
+                },
+                {
+                  id: "faster-whisper",
+                  name: "Faster-Whisper Tiny",
+                  category: "asr",
+                  provider: "faster-whisper",
+                  status: "ready",
+                  version: "tiny",
+                  source_url: null,
+                  checksum: null,
+                  license: "MIT",
+                  disk_size_mb: 150,
+                  installed_path: "/models/asr",
+                  languages: ["multilingual"],
+                  capabilities: ["transcribe"],
+                  requires_confirmation: true,
+                  non_commercial: false,
+                  detail: null,
+                  actions: ["install"],
+                },
+                {
+                  id: "argos-translate",
+                  name: "Argos Translate",
+                  category: "translation",
+                  provider: "argos",
+                  status: "not_installed",
+                  version: "starter",
+                  source_url: null,
+                  checksum: null,
+                  license: "MIT",
+                  disk_size_mb: 250,
+                  installed_path: "/models/argos",
+                  languages: ["en->hi"],
+                  capabilities: ["translate"],
+                  requires_confirmation: true,
+                  non_commercial: false,
+                  detail: null,
+                  actions: ["install"],
+                },
+              ],
+              jobs: [],
+              total: 3,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+        );
+      }
+      if (url.endsWith("/api/model-packs/kokoro-v1-onnx/install")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "job-1",
+              kind: "model-pack:install:kokoro-v1-onnx",
+              status: "queued",
+              progress: 0,
+              message: "Queued install.",
+            }),
+            { status: 202, headers: { "Content-Type": "application/json" } }
+          )
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
     vi.stubGlobal("fetch", fetchMock);
     render(
       <ModelPackManager
@@ -145,13 +232,37 @@ describe("ModelPackManager", () => {
       />
     );
     expect(screen.getByRole("heading", { name: /model pack manager/i })).toBeInTheDocument();
-    expect(screen.getByText(/tts packs/i)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /download kokoro pack/i }));
+    expect(await screen.findByText(/tts packs/i)).toBeInTheDocument();
+    const kokoroCard = screen.getByText("Kokoro v1.0 ONNX").closest("article");
+    expect(kokoroCard).not.toBeNull();
+    await user.click(within(kokoroCard as HTMLElement).getByRole("button", { name: /install/i }));
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://backend/api/setup/provision-models",
+      "http://backend/api/model-packs/kokoro-v1-onnx/install",
       expect.objectContaining({ method: "POST" })
     );
     vi.unstubAllGlobals();
+  });
+});
+
+describe("FirstRunWizard", () => {
+  it("shows local runtime language and setup actions", async () => {
+    window.localStorage.removeItem("kural.firstRunWizard.dismissed.v1");
+    render(
+      <FirstRunWizard
+        backendStatus={null}
+        backendError=""
+        clones={[]}
+        models={[]}
+        onCreateSampleProject={() => undefined}
+        onOpenModels={() => undefined}
+        onRefresh={() => undefined}
+      />
+    );
+
+    expect(
+      await screen.findByText(/Kural runs the speech engine locally on this computer/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create sample project/i })).toBeInTheDocument();
   });
 });
 
@@ -216,17 +327,22 @@ describe("QualityStudio", () => {
 
 describe("SettingsView", () => {
   it("groups dictation, release diagnostics, and privacy panels", () => {
+    const project = createProject("Settings test");
     render(
       <SettingsView
+        activeProject={project}
         apiUrl="http://127.0.0.1:8000"
         assets={[]}
         backendError={null}
         backendStatus="kokoro 0.2.0"
         clones={[]}
         models={[]}
+        projects={[project]}
+        onUpdateProject={() => undefined}
       />
     );
     expect(screen.getByRole("heading", { name: /dictation settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /project vault/i })).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: /desktop release diagnostics/i })
     ).toBeInTheDocument();

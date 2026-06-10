@@ -26,7 +26,7 @@ const DICTATION_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 struct BackendProcess(Mutex<Option<Child>>);
 struct BackendPort(u16);
 struct BackendApiKey(String);
-struct BackendStartupError(Option<String>);
+struct BackendStartupError(Mutex<Option<String>>);
 struct RuntimePaths {
     app_data_dir: Option<PathBuf>,
 }
@@ -382,11 +382,16 @@ fn get_runtime_diagnostics(
         .lock()
         .map(|guard| guard.is_some())
         .unwrap_or(false);
+    let backend_error = startup_error
+        .0
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
     RuntimeDiagnostics {
         backend_url: format!("http://127.0.0.1:{}", port.0),
         api_key_present: !key.0.is_empty(),
         backend_running,
-        backend_error: startup_error.0.clone(),
+        backend_error,
         app_data_dir: paths
             .app_data_dir
             .as_ref()
@@ -395,6 +400,48 @@ fn get_runtime_diagnostics(
             .ok()
             .map(|path| path.display().to_string()),
     }
+}
+
+#[tauri::command]
+fn restart_backend(
+    app: tauri::AppHandle,
+    process: tauri::State<BackendProcess>,
+    port: tauri::State<BackendPort>,
+    key: tauri::State<BackendApiKey>,
+    startup_error: tauri::State<BackendStartupError>,
+    paths: tauri::State<RuntimePaths>,
+) -> Result<(), String> {
+    kill_backend(&app);
+    let resource_dir = app.path().resource_dir().ok();
+    let app_data_dir = paths.app_data_dir.clone();
+    let mut child = start_backend(port.0, &key.0, resource_dir, app_data_dir)
+        .map_err(|err| format!("Could not restart local engine: {err}"))?;
+    if let Err(err) = wait_for_backend(port.0, &mut child, Duration::from_secs(15)) {
+        let _ = child.kill();
+        let _ = child.wait();
+        if let Ok(mut guard) = startup_error.0.lock() {
+            *guard = Some(err.to_string());
+        }
+        return Err(format!("Local engine restart failed: {err}"));
+    }
+    if let Ok(mut guard) = process.0.lock() {
+        *guard = Some(child);
+    }
+    if let Ok(mut guard) = startup_error.0.lock() {
+        *guard = None;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn open_logs_folder(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
+    let app_data_dir = paths
+        .app_data_dir
+        .as_ref()
+        .ok_or_else(|| "App data folder is unavailable.".to_string())?;
+    let logs_dir = app_data_dir.join("logs");
+    fs::create_dir_all(&logs_dir).map_err(|err| format!("Could not create logs folder: {err}"))?;
+    open_path_in_file_manager(&logs_dir, false)
 }
 
 fn default_audio_library_dir() -> Result<PathBuf, String> {
@@ -507,15 +554,29 @@ fn reveal_path(path: String) -> Result<(), String> {
         return Err("Saved file no longer exists.".to_string());
     }
 
+    open_path_in_file_manager(&target, true)
+}
+
+fn open_path_in_file_manager(target: &Path, reveal: bool) -> Result<(), String> {
     let status = if cfg!(target_os = "windows") {
-        Command::new("explorer.exe")
-            .arg(format!("/select,{}", target.display()))
-            .status()
+        let mut command = Command::new("explorer.exe");
+        if reveal {
+            command.arg(format!("/select,{}", target.display()));
+        } else {
+            command.arg(target);
+        }
+        command.status()
     } else if cfg!(target_os = "macos") {
-        Command::new("open").arg("-R").arg(&target).status()
+        if reveal {
+            Command::new("open").arg("-R").arg(target).status()
+        } else {
+            Command::new("open").arg(target).status()
+        }
     } else {
         let folder = target.parent().unwrap_or_else(|| Path::new("."));
-        Command::new("xdg-open").arg(folder).status()
+        Command::new("xdg-open")
+            .arg(if reveal { folder } else { target })
+            .status()
     }
     .map_err(|err| format!("Could not open file manager: {err}"))?;
 
@@ -638,7 +699,7 @@ fn main() {
             app.manage(BackendProcess(Mutex::new(child_opt)));
             app.manage(BackendPort(port));
             app.manage(BackendApiKey(api_key.clone()));
-            app.manage(BackendStartupError(backend_error.clone()));
+            app.manage(BackendStartupError(Mutex::new(backend_error.clone())));
             app.manage(RuntimePaths { app_data_dir });
 
             // App menu (macOS menu bar; also used on Linux/Windows)
@@ -733,6 +794,8 @@ fn main() {
             get_backend_url,
             get_api_key,
             get_runtime_diagnostics,
+            restart_backend,
+            open_logs_folder,
             save_audio_file,
             reveal_path,
             dictation_paste

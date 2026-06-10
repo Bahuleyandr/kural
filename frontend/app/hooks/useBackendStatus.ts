@@ -50,7 +50,10 @@ export function useBackendStatus(apiUrl: string): BackendStatus {
         const health = await apiFetch(`${apiUrl}/api/health`, { signal });
         if (health.ok) {
           const data = await health.json();
-          if (!signal.aborted) setBackendStatus(`${data.engine} ${data.version}`);
+          if (!signal.aborted) {
+            setBackendStatus(`${data.engine} ${data.version}`);
+            setBackendError("");
+          }
         }
       } catch (exc) {
         if (!signal.aborted && !isAbortError(exc)) {

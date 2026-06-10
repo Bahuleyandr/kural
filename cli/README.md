@@ -14,6 +14,8 @@ kural voices --clones                # list Kokoro and cloned voices
 kural voices clone sample.wav --name "My Voice" --consent
 kural voices export voices.zip
 kural voices import voices.zip
+kural models                         # list local model packs and jobs
+kural models --category asr          # filter by tts/asr/translation
 kural speak "Hello" --voice-id <clone-id>
 ```
 

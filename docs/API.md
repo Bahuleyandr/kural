@@ -23,6 +23,34 @@ curl http://localhost:8000/api/local-models
 
 Kural reports optional local ASR and translation adapters without downloading model packs. `ready` means the Python package or external binary is installed and the configured local model folder has files. `not_installed` or `not_configured` means the UI can show the workflow but the backend will return a structured `503` until the pack is provisioned.
 
+## Model Packs And Jobs
+
+```bash
+curl http://localhost:8000/api/model-packs
+curl -X POST http://localhost:8000/api/model-packs/kokoro-v1-onnx/install
+curl -X POST http://localhost:8000/api/model-packs/faster-whisper/update
+curl -X DELETE http://localhost:8000/api/model-packs/jobs/<job-id>
+```
+
+The model-pack API is the only path the UI uses for installs/removals. Each action is a backend-defined safe operation; the browser never runs arbitrary shell commands. Pack records include `id`, `version`, `source_url`, `checksum`, `license`, `disk_size_mb`, `installed_path`, `languages`, `capabilities`, `requires_confirmation`, `non_commercial`, and supported `actions`.
+
+Background jobs use one shared shape:
+
+```json
+{
+  "id": "ecf1...",
+  "kind": "model-pack:install:kokoro-v1-onnx",
+  "status": "running",
+  "progress": 20,
+  "message": "Launching safe provisioner",
+  "started_at": "2026-06-11T10:00:00Z",
+  "completed_at": null,
+  "error": null
+}
+```
+
+Manual runtime packs such as Chatterbox, Vosk, IndicTrans2, and NLLB expose inventory and instructions but may reject install/remove actions unless Kural owns a configured model folder.
+
 ## Synthesis
 
 ```bash
@@ -109,6 +137,18 @@ curl -X POST http://localhost:8000/api/transcribe \
 ```
 
 Optional adapter dependencies live in `backend/requirements-local-models.txt`. Kural does not include or download ASR/translation model weights in the default package.
+
+Rendered dubbing segments can be aligned against expected text and slot duration:
+
+```bash
+curl -X POST http://localhost:8000/api/align \
+  -F "expected_text=Hello world" \
+  -F "expected_duration_ms=1800" \
+  -F "language=en-US" \
+  -F "file=@rendered-segment.wav"
+```
+
+The response includes `duration_ms`, optional `overrun_ms`, and word-level timestamps when the local aligner can provide them. If ASR alignment is unavailable, Kural returns `503` with `detail.code="alignment_unavailable"`.
 
 ## Local Project Archives
 

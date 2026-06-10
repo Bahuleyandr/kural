@@ -6,6 +6,7 @@ import { AudioLibrary } from "./components/AudioLibrary";
 import { ClonePanel } from "./components/ClonePanel";
 import { ControlPanel } from "./components/ControlPanel";
 import { DubbingTimeline } from "./components/DubbingTimeline";
+import { FirstRunWizard, LocalRuntimeStatus } from "./components/FirstRunWizard";
 import { LocalModelPanel } from "./components/LocalModelPanel";
 import { ModelPackManager } from "./components/ModelPackManager";
 import {
@@ -14,6 +15,7 @@ import {
   type QualityResult,
 } from "./components/QualityStudio";
 import { SettingsView } from "./components/SettingsView";
+import { ScriptStudio } from "./components/ScriptStudio";
 import { TtsEnginePanel } from "./components/TtsEnginePanel";
 import { SetupBanner } from "./components/SetupBanner";
 import { WorkspaceTabs } from "./components/WorkspaceTabs";
@@ -31,22 +33,37 @@ import {
   toApiControls,
   toApiRules,
 } from "./lib/clientUtils";
-import { formatTime, parseTranscript } from "./lib/dubbing";
+import {
+  exportSegmentsAsCsv,
+  exportSegmentsAsSrt,
+  exportSegmentsAsVtt,
+  formatTime,
+  parseTranscript,
+} from "./lib/dubbing";
 import {
   PERFORMANCE_STYLES,
   applyPerformanceStyle,
   getPerformanceStyle,
   prepareTextForPerformance,
 } from "./lib/performanceStyles";
-import type { Mode, TranscriptionResponse, VoiceKind, WorkspaceView } from "./lib/types";
+import type {
+  AlignmentResponse,
+  Mode,
+  TranscriptionResponse,
+  VoiceKind,
+  WorkspaceView,
+} from "./lib/types";
 import { stitchWavBlobs } from "./lib/wav";
 import {
   DEFAULT_CONTROLS,
+  createProject,
   createId,
   deleteAudioAsset,
   exportProjectArchive,
   importProjectArchive,
   saveAudioAsset,
+  saveProject,
+  setActiveProject as storeActiveProject,
   type AudioAsset,
   type AudioControls,
   type DubbingSegment,
@@ -84,7 +101,9 @@ export default function Home() {
     assets,
     workspaceError,
     setAssets,
+    setProjects,
     setWorkspaceError,
+    setActiveProjectId,
     refreshWorkspace,
     persistProject,
     createNewProject,
@@ -93,6 +112,7 @@ export default function Home() {
   } = useWorkspace();
 
   const [activeView, setActiveView] = useState<WorkspaceView>("write");
+  const [projectSearch, setProjectSearch] = useState("");
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
   const [assetDurations, setAssetDurations] = useState<Record<string, number>>({});
 
@@ -141,6 +161,17 @@ export default function Home() {
       null,
     [activeProject]
   );
+  const visibleProjects = useMemo(() => {
+    const query = projectSearch.trim().toLowerCase();
+    return projects.filter((project) => {
+      if (!query) return true;
+      return (
+        project.name.toLowerCase().includes(query) ||
+        project.description.toLowerCase().includes(query) ||
+        (project.tags || []).some((tag) => tag.toLowerCase().includes(query))
+      );
+    });
+  }, [projectSearch, projects]);
 
   const voiceOptions = useMemo(() => {
     const builtin = voices.map((voice) => {
@@ -267,6 +298,87 @@ export default function Home() {
   function updateActiveProjectFields(fields: Partial<KuralProject>) {
     if (!activeProject) return;
     persistProject({ ...activeProject, ...fields });
+  }
+
+  async function createSampleProject() {
+    const project = createProject("Offline Creator Pro sample");
+    const now = new Date().toISOString();
+    project.description = "A starter project for testing Kural voiceover and dubbing workflows.";
+    project.tags = ["sample", "public-beta"];
+    project.sourceLanguage = "en-US";
+    project.targetLanguage = "hi-IN";
+    project.documents = project.documents.map((document) => ({
+      ...document,
+      title: "Launch narration",
+      text:
+        "Welcome to Kural. This project shows how to write a short narration, test voice styles, translate a segment, and export local audio without sending your voice data to a cloud service.",
+      updatedAt: now,
+    }));
+    project.dubbingSegments = [
+      {
+        id: createId("dub"),
+        startMs: 0,
+        endMs: 4200,
+        speaker: "Narrator",
+        sourceText: "Welcome to Kural, an offline creator workstation for voice and dubbing.",
+        targetText: "Welcome to Kural, an offline creator workstation for voice and dubbing.",
+        sourceLanguage: "en-US",
+        targetLanguage: "hi-IN",
+        voiceId: selectedVoiceKey,
+        controls: { ...controls, format: "wav" },
+        status: "draft",
+        notes: "Sample segment",
+      },
+    ];
+    await saveProject(project);
+    setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
+    setActiveProjectId(project.id);
+    storeActiveProject(project.id);
+    setAssets([]);
+    setActiveView("write");
+    setSuccess("Created a sample Public Beta project.");
+  }
+
+  async function duplicateActiveProject() {
+    if (!activeProject) return;
+    const cloneMap = new Map<string, string>();
+    const duplicated: KuralProject = {
+      ...activeProject,
+      id: createId("project"),
+      name: `${activeProject.name} copy`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      documents: activeProject.documents.map((document) => {
+        const id = createId("doc");
+        cloneMap.set(document.id, id);
+        return { ...document, id, title: `${document.title} copy` };
+      }),
+      voicePresets: activeProject.voicePresets.map((preset) => ({
+        ...preset,
+        id: createId("preset"),
+      })),
+      pronunciationProfiles: activeProject.pronunciationProfiles.map((profile) => ({
+        ...profile,
+        id: createId("pron"),
+        rules: profile.rules.map((rule) => ({ ...rule, id: createId("rule") })),
+      })),
+      dubbingSegments: activeProject.dubbingSegments.map((segment) => ({
+        ...segment,
+        id: createId("dub"),
+        audioAssetId: undefined,
+        status: "draft",
+        alignment: undefined,
+      })),
+    };
+    duplicated.activeDocumentId =
+      cloneMap.get(activeProject.activeDocumentId) || duplicated.documents[0]?.id || "";
+    duplicated.activePronunciationProfileId = duplicated.pronunciationProfiles[0]?.id || "";
+    await saveProject(duplicated);
+    setProjects((current) => [duplicated, ...current]);
+    setActiveProjectId(duplicated.id);
+    storeActiveProject(duplicated.id);
+    setAssets([]);
+    setSuccess("Duplicated project without generated audio assets.");
   }
 
   async function synthesizeText(
@@ -603,6 +715,7 @@ export default function Home() {
             endMs,
             sourceText: segment.text.trim(),
             targetText: segment.text.trim(),
+            speaker: "Speaker 1",
             sourceLanguage: data.language || activeProject.sourceLanguage,
             targetLanguage: activeProject.targetLanguage,
             voiceId: selectedVoiceKey,
@@ -748,11 +861,86 @@ export default function Home() {
       await saveAudioAsset(asset);
       setAssets((current) => [asset, ...current]);
       updateSegment(segment.id, { status: "ready", audioAssetId: asset.id, error: undefined });
+      void alignSegment({ ...segment, status: "ready", audioAssetId: asset.id }, asset);
     } catch (exc) {
       updateSegment(segment.id, {
         status: "error",
         error: exc instanceof Error ? exc.message : "Could not render segment",
       });
+    }
+  }
+
+  async function renderAllSegments() {
+    if (!activeProject) return;
+    for (const segment of activeProject.dubbingSegments) {
+      if (segment.status === "rendering") continue;
+      await renderSegment(segment);
+    }
+  }
+
+  async function retryFailedSegments() {
+    if (!activeProject) return;
+    for (const segment of activeProject.dubbingSegments.filter((item) => item.status === "error")) {
+      await renderSegment(segment);
+    }
+  }
+
+  async function alignSegment(segment: DubbingSegment, suppliedAsset?: AudioAsset) {
+    if (!activeProject) return;
+    const asset =
+      suppliedAsset || assets.find((candidate) => candidate.id === segment.audioAssetId);
+    if (!asset) {
+      updateSegment(segment.id, { error: "Render this segment before alignment." });
+      return;
+    }
+    try {
+      const form = new FormData();
+      form.append("file", asset.blob, `${asset.name}.${asset.format}`);
+      form.append("expected_text", segment.targetText || segment.sourceText);
+      form.append("expected_duration_ms", String(segment.endMs - segment.startMs));
+      form.append("language", segment.targetLanguage || activeProject.targetLanguage);
+      const res = await apiFetch(`${apiUrl}/api/align`, { method: "POST", body: form });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const data = (await res.json()) as AlignmentResponse;
+      const suggestedSpeed =
+        data.overrun_ms && data.expected_duration_ms && data.expected_duration_ms > 0
+          ? Math.min(
+              2,
+              Math.max(
+                0.5,
+                segment.controls.speed *
+                  (data.duration_ms / Math.max(1, data.expected_duration_ms))
+              )
+            )
+          : segment.controls.speed;
+      updateSegment(segment.id, {
+        alignment: {
+          provider: data.provider,
+          durationMs: data.duration_ms,
+          overrunMs: data.overrun_ms || 0,
+          words: data.words.map((word) => ({
+            text: word.text,
+            startMs: word.start_ms,
+            endMs: word.end_ms,
+            probability: word.probability,
+          })),
+          checkedAt: new Date().toISOString(),
+        },
+        notes:
+          data.overrun_ms && data.overrun_ms > 0
+            ? `${segment.notes ? `${segment.notes}; ` : ""}Align: try speed ${suggestedSpeed.toFixed(2)}`
+            : segment.notes,
+      });
+      setSuccess(
+        data.overrun_ms && data.overrun_ms > 0
+          ? `Alignment found an overrun. Try speed ${suggestedSpeed.toFixed(2)}.`
+          : "Alignment check passed."
+      );
+    } catch (exc) {
+      updateSegment(segment.id, {
+        error: exc instanceof Error ? exc.message : "Could not align segment",
+      });
+      setError(exc instanceof Error ? exc.message : "Could not align segment");
     }
   }
 
@@ -774,9 +962,51 @@ export default function Home() {
     try {
       const blob = await stitchWavBlobs(rendered.map((asset) => asset.blob));
       downloadBlob(blob, `${activeProject.name || "kural"}-dubbing.wav`);
+      downloadBlob(
+        new Blob(
+          [
+            JSON.stringify(
+              {
+                app: "Kural",
+                kind: "synthetic-audio-provenance",
+                exportedAt: new Date().toISOString(),
+                projectId: activeProject.id,
+                projectName: activeProject.name,
+                segments: activeProject.dubbingSegments.map((segment) => ({
+                  id: segment.id,
+                  speaker: segment.speaker,
+                  voiceId: segment.voiceId,
+                  sourceLanguage: segment.sourceLanguage,
+                  targetLanguage: segment.targetLanguage,
+                  startMs: segment.startMs,
+                  endMs: segment.endMs,
+                  audioAssetId: segment.audioAssetId,
+                })),
+              },
+              null,
+              2
+            ),
+          ],
+          { type: "application/json" }
+        ),
+        `${activeProject.name || "kural"}-dubbing.provenance.json`
+      );
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not export dubbing timeline");
     }
+  }
+
+  function exportDubbingTranscript(format: "srt" | "vtt" | "csv") {
+    if (!activeProject || activeProject.dubbingSegments.length === 0) return;
+    const sorted = [...activeProject.dubbingSegments].sort((a, b) => a.startMs - b.startMs);
+    const text =
+      format === "srt"
+        ? exportSegmentsAsSrt(sorted)
+        : format === "vtt"
+          ? exportSegmentsAsVtt(sorted)
+          : exportSegmentsAsCsv(sorted);
+    const mime = format === "csv" ? "text/csv" : "text/plain";
+    downloadBlob(new Blob([text], { type: mime }), `${activeProject.name || "kural"}.${format}`);
   }
 
   async function exportActiveProject() {
@@ -905,8 +1135,16 @@ export default function Home() {
             </button>
           </div>
 
+          <input
+            className="mb-3 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+            value={projectSearch}
+            onChange={(event) => setProjectSearch(event.target.value)}
+            placeholder="Search projects or tags"
+            aria-label="Search projects"
+          />
+
           <div className="space-y-2" role="list">
-            {projects.map((project) => (
+            {visibleProjects.map((project) => (
               <button
                 type="button"
                 key={project.id}
@@ -920,9 +1158,17 @@ export default function Home() {
                 onClick={() => void switchProject(project.id)}
               >
                 <span className="block font-medium">{project.name}</span>
-                <span className="block text-xs opacity-75">{project.targetLanguage}</span>
+                <span className="block text-xs opacity-75">
+                  {project.targetLanguage}
+                  {project.archived ? " / archived" : ""}
+                </span>
               </button>
             ))}
+            {visibleProjects.length === 0 && (
+              <p className="rounded border border-slate-200 p-3 text-sm text-slate-500">
+                No projects match this search.
+              </p>
+            )}
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2">
@@ -944,7 +1190,15 @@ export default function Home() {
             </label>
             <button
               type="button"
-              className="col-span-2 rounded border border-red-300 px-2 py-2 text-sm text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-40"
+              className="rounded border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+              disabled={!activeProject}
+              onClick={() => void duplicateActiveProject()}
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              className="rounded border border-red-300 px-2 py-2 text-sm text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-40"
               disabled={projects.length <= 1}
               onClick={() => void removeActiveProject(activeProject)}
             >
@@ -952,27 +1206,32 @@ export default function Home() {
             </button>
           </div>
 
-          <div
-            className="mt-4 rounded border border-slate-200 p-3 text-xs text-slate-600"
-            aria-live="polite"
-          >
-            <p>Backend: {backendStatus || "checking"}</p>
-            <p>API: {apiUrl}</p>
-            {backendError && (
-              <p className="mt-2 text-red-700" role="alert">
-                {backendError}
-              </p>
-            )}
-            {workspaceError && (
+          <LocalRuntimeStatus
+            apiUrl={apiUrl}
+            backendError={backendError}
+            backendStatus={backendStatus}
+            onRefresh={refreshBackend}
+          />
+          {workspaceError && (
+            <div className="mt-3 rounded border border-red-200 p-3 text-xs text-red-700">
               <p className="mt-2 text-red-700" role="alert">
                 {workspaceError}
               </p>
-            )}
-          </div>
+            </div>
+          )}
         </aside>
 
         <section id="workspace" className="min-w-0 flex-1" aria-label="Workspace">
           <SetupBanner apiUrl={apiUrl} />
+          <FirstRunWizard
+            backendError={backendError}
+            backendStatus={backendStatus}
+            clones={clones}
+            models={localModels}
+            onCreateSampleProject={() => void createSampleProject()}
+            onOpenModels={() => setActiveView("models")}
+            onRefresh={refreshBackend}
+          />
           <div className="rounded border border-slate-300 bg-white">
             <div className="flex flex-col gap-3 border-b border-slate-200 p-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="grid gap-2 md:grid-cols-[minmax(0,2fr)_1fr_1fr]">
@@ -1044,30 +1303,15 @@ export default function Home() {
                     >
                       Batch
                     </button>
-                    <label className="flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={ssmlEnabled}
-                        onChange={(event) => setSsmlEnabled(event.target.checked)}
-                      />
-                      SSML
-                    </label>
                   </div>
 
-                  <label className="block text-sm font-medium">
-                    Text
-                    <textarea
-                      id="script-text"
-                      className="mt-2 min-h-72 w-full resize-y rounded border border-slate-300 px-3 py-3 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      value={activeDocument?.text || ""}
-                      onChange={(event) => updateDocumentText(event.target.value)}
-                      placeholder={
-                        mode === "batch"
-                          ? "Separate each script with a blank line."
-                          : "Write or paste the script for this project."
-                      }
-                    />
-                  </label>
+                  <ScriptStudio
+                    mode={mode}
+                    ssmlEnabled={ssmlEnabled}
+                    text={activeDocument?.text || ""}
+                    onSsmlEnabledChange={setSsmlEnabled}
+                    onTextChange={updateDocumentText}
+                  />
 
                   {error && (
                     <p
@@ -1306,9 +1550,13 @@ export default function Home() {
                   segments={activeProject.dubbingSegments}
                   voiceOptions={voiceOptions}
                   onExportTimeline={exportDubbingTimeline}
+                  onExportTranscript={exportDubbingTranscript}
+                  onAlignSegment={(segment) => void alignSegment(segment)}
                   onImportMedia={transcribeMediaFile}
                   onImportTranscript={importTranscriptFile}
+                  onRenderAll={() => void renderAllSegments()}
                   onRenderSegment={(segment) => void renderSegment(segment)}
+                  onRetryFailed={() => void retryFailedSegments()}
                   onTranslateAll={() => void translateAllSegments()}
                   onTranslateSegment={(segment) => void translateSegment(segment)}
                   onUpdateSegment={updateSegment}
@@ -1470,12 +1718,15 @@ export default function Home() {
             {activeView === "settings" && (
               <div className="p-4">
                 <SettingsView
+                  activeProject={activeProject}
                   apiUrl={apiUrl}
                   assets={assets}
                   backendError={backendError}
                   backendStatus={backendStatus}
                   clones={clones}
                   models={localModels}
+                  projects={projects}
+                  onUpdateProject={updateActiveProjectFields}
                 />
               </div>
             )}

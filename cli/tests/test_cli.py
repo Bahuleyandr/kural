@@ -53,3 +53,49 @@ def test_voices_import_prints_imported_clones(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "Portable" in result.output
+
+
+def test_models_lists_model_packs(monkeypatch):
+    def fake_list_model_packs(host: str):
+        assert host == "http://backend"
+        return {
+            "packs": [
+                {
+                    "id": "kokoro-v1-onnx",
+                    "category": "tts",
+                    "status": "ready",
+                    "version": "1.0",
+                    "license": "Apache-2.0",
+                    "installed_path": "/models/kokoro",
+                },
+                {
+                    "id": "argos-translate",
+                    "category": "translation",
+                    "status": "not_installed",
+                    "version": "starter",
+                    "license": "MIT",
+                    "installed_path": "",
+                },
+            ],
+            "jobs": [
+                {
+                    "kind": "model-pack:install:kokoro-v1-onnx",
+                    "status": "succeeded",
+                    "progress": 100,
+                    "message": "done",
+                }
+            ],
+            "total": 2,
+        }
+
+    monkeypatch.setattr(cli_module, "list_model_packs", fake_list_model_packs)
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["models", "--host", "http://backend", "--category", "tts"],
+    )
+
+    assert result.exit_code == 0
+    assert "kokoro-v1-onnx" in result.output
+    assert "argos-translate" not in result.output
+    assert "model-pack:install:kokoro-v1-onnx" in result.output

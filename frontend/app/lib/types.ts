@@ -36,6 +36,64 @@ export interface LocalModelInfo {
   detail?: string | null;
 }
 
+export type ModelPackAction = "install" | "update" | "remove";
+export type BackgroundJobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+
+export interface BackgroundJob {
+  id: string;
+  kind: string;
+  status: BackgroundJobStatus;
+  progress: number;
+  message: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+}
+
+export interface ModelPackInfo {
+  id: string;
+  name: string;
+  category: LocalModelInfo["category"];
+  provider: string;
+  status: LocalModelInfo["status"];
+  version: string;
+  source_url?: string | null;
+  checksum?: string | null;
+  license?: string | null;
+  disk_size_mb?: number | null;
+  installed_path?: string | null;
+  languages: string[];
+  capabilities: string[];
+  requires_confirmation: boolean;
+  non_commercial: boolean;
+  detail?: string | null;
+  actions: ModelPackAction[];
+}
+
+export interface ModelPacksResponse {
+  packs: ModelPackInfo[];
+  jobs: BackgroundJob[];
+  total: number;
+}
+
+export interface AlignmentWord {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  probability?: number | null;
+}
+
+export interface AlignmentResponse {
+  provider: string;
+  duration_ms: number;
+  transcript: string;
+  language?: string | null;
+  expected_text?: string | null;
+  expected_duration_ms?: number | null;
+  overrun_ms?: number | null;
+  words: AlignmentWord[];
+}
+
 export interface TranscriptionSegmentResponse {
   start_ms: number;
   end_ms: number;

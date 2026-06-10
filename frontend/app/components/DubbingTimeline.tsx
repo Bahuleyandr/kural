@@ -19,16 +19,26 @@ export function DubbingTimeline(props: {
   onTranslateAll: () => void;
   onTranslateSegment: (segment: DubbingSegment) => void;
   onRenderSegment: (segment: DubbingSegment) => void;
+  onRenderAll: () => void;
+  onRetryFailed: () => void;
+  onAlignSegment: (segment: DubbingSegment) => void;
   onExportTimeline: () => void;
+  onExportTranscript: (format: "srt" | "vtt" | "csv") => void;
   onUpdateSegment: (segmentId: string, fields: Partial<DubbingSegment>) => void;
 }) {
   const maxEnd = Math.max(1, ...props.segments.map((segment) => segment.endMs));
   const readyCount = props.segments.filter((segment) => segment.status === "ready").length;
   const overrunCount = props.segments.filter((segment) => {
+    const aligned = segment.alignment?.overrunMs || 0;
+    if (aligned > 0) return true;
     if (!segment.audioAssetId) return false;
     const duration = props.assetDurations[segment.audioAssetId] || 0;
     return duration > segment.endMs - segment.startMs;
   }).length;
+  const failedCount = props.segments.filter((segment) => segment.status === "error").length;
+  const speakers = Array.from(
+    new Set(props.segments.map((segment) => segment.speaker || "Speaker 1"))
+  );
 
   return (
     <section className="space-y-4" aria-labelledby="dubbing-timeline-heading">
@@ -74,11 +84,38 @@ export function DubbingTimeline(props: {
           </button>
           <button
             type="button"
+            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+            disabled={props.segments.length === 0}
+            onClick={props.onRenderAll}
+          >
+            Render All
+          </button>
+          <button
+            type="button"
+            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+            disabled={failedCount === 0}
+            onClick={props.onRetryFailed}
+          >
+            Retry Failed
+          </button>
+          <button
+            type="button"
             className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             onClick={props.onExportTimeline}
           >
             Export WAV Timeline
           </button>
+          {(["srt", "vtt", "csv"] as const).map((format) => (
+            <button
+              type="button"
+              key={format}
+              className="rounded border border-slate-300 px-3 py-2 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+              disabled={props.segments.length === 0}
+              onClick={() => props.onExportTranscript(format)}
+            >
+              {format}
+            </button>
+          ))}
           <span className="text-sm text-slate-500" role="status" aria-live="polite">
             {props.isTranscribing
               ? "Transcribing..."
@@ -90,6 +127,13 @@ export function DubbingTimeline(props: {
 
       {props.segments.length > 0 && (
         <section className="rounded border border-slate-300 bg-white p-4" aria-label="Timeline overview">
+          <div className="mb-3 flex flex-wrap gap-2 text-xs text-slate-600">
+            {speakers.map((speaker) => (
+              <span key={speaker} className="rounded border border-slate-200 px-2 py-1">
+                {speaker}
+              </span>
+            ))}
+          </div>
           <div className="relative h-24 rounded border border-slate-200 bg-slate-50">
             {props.segments.map((segment, index) => {
               const left = Math.max(0, (segment.startMs / maxEnd) * 100);
@@ -100,7 +144,9 @@ export function DubbingTimeline(props: {
               const duration = segment.audioAssetId
                 ? props.assetDurations[segment.audioAssetId] || 0
                 : 0;
-              const overrun = duration > 0 && duration > segment.endMs - segment.startMs;
+              const overrun =
+                (segment.alignment?.overrunMs || 0) > 0 ||
+                (duration > 0 && duration > segment.endMs - segment.startMs);
               return (
                 <button
                   type="button"
@@ -116,6 +162,7 @@ export function DubbingTimeline(props: {
                   aria-label={`Timeline segment ${index + 1}`}
                 >
                   <span className="block truncate font-medium">{index + 1}</span>
+                  <span className="block truncate">{segment.speaker || "Speaker 1"}</span>
                   <span className="block truncate">{formatTime(segment.startMs)}</span>
                 </button>
               );
@@ -131,7 +178,8 @@ export function DubbingTimeline(props: {
           const asset = props.assets.find((candidate) => candidate.id === segment.audioAssetId);
           const duration = segment.audioAssetId ? props.assetDurations[segment.audioAssetId] || 0 : 0;
           const limit = segment.endMs - segment.startMs;
-          const overrun = duration > 0 && duration > limit;
+          const alignedOverrun = segment.alignment?.overrunMs || 0;
+          const overrun = alignedOverrun > 0 || (duration > 0 && duration > limit);
           return (
             <section
               key={segment.id}
@@ -144,7 +192,10 @@ export function DubbingTimeline(props: {
                     Segment {index + 1} - {formatTime(segment.startMs)}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Slot {formatTime(limit)} {overrun ? `/ overrun by ${formatTime(duration - limit)}` : ""}
+                    {segment.speaker || "Speaker 1"} / Slot {formatTime(limit)}{" "}
+                    {overrun
+                      ? `/ overrun by ${formatTime(Math.max(alignedOverrun, duration - limit))}`
+                      : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -155,6 +206,14 @@ export function DubbingTimeline(props: {
                     onClick={() => props.onTranslateSegment(segment)}
                   >
                     Translate
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+                    disabled={!asset}
+                    onClick={() => props.onAlignSegment(segment)}
+                  >
+                    Align
                   </button>
                   <button
                     type="button"
@@ -189,7 +248,16 @@ export function DubbingTimeline(props: {
                   />
                 </label>
               </div>
-              <div className="mt-3 grid gap-2 md:grid-cols-4">
+              <div className="mt-3 grid gap-2 md:grid-cols-5">
+                <input
+                  className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  value={segment.speaker || "Speaker 1"}
+                  onChange={(event) =>
+                    props.onUpdateSegment(segment.id, { speaker: event.target.value || "Speaker 1" })
+                  }
+                  placeholder="Speaker"
+                  aria-label={`Speaker for segment ${index + 1}`}
+                />
                 <label className="sr-only" htmlFor={`segment-voice-${segment.id}`}>
                   Voice for segment {index + 1}
                 </label>
@@ -234,6 +302,26 @@ export function DubbingTimeline(props: {
                   {segment.status}
                 </span>
               </div>
+              {segment.alignment && (
+                <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <span>
+                      Alignment: {segment.alignment.provider} /{" "}
+                      {formatTime(segment.alignment.durationMs)}
+                    </span>
+                    <span>
+                      {segment.alignment.overrunMs > 0
+                        ? `Overrun ${formatTime(segment.alignment.overrunMs)}`
+                        : "On time"}
+                    </span>
+                  </div>
+                  {segment.alignment.words.length > 0 && (
+                    <p className="mt-2 line-clamp-2">
+                      {segment.alignment.words.slice(0, 12).map((word) => word.text).join(" ")}
+                    </p>
+                  )}
+                </div>
+              )}
               {asset && props.audioUrls[asset.id] && (
                 <audio
                   className="mt-3 w-full"

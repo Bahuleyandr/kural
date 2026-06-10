@@ -89,6 +89,35 @@ def list_cloned_voices() -> list[dict]:
 
 
 @mcp.tool()
+def list_model_packs(category: str = "", include_jobs: bool = True) -> dict:
+    """List Kural local model packs and background jobs.
+
+    Args:
+        category: Optional workflow filter — "tts", "asr", or
+            "translation". Empty returns every pack.
+        include_jobs: Include recent background job state.
+
+    Returns model-pack records with id, status, license, capabilities,
+    install path, and safe backend-supported actions. This is intentionally
+    read-only from MCP: use the Kural app or HTTP API for installs/removals so
+    license gates and large-download confirmations stay human-visible.
+    """
+    payload = _client.list_model_packs()
+    packs = payload.get("packs", [])
+    if category:
+        if category not in {"tts", "asr", "translation"}:
+            raise KuralBackendError(
+                f"Unsupported category {category!r}; use 'tts', 'asr', or 'translation'."
+            )
+        packs = [pack for pack in packs if pack.get("category") == category]
+    return {
+        "packs": packs,
+        "total": len(packs),
+        "jobs": payload.get("jobs", []) if include_jobs else [],
+    }
+
+
+@mcp.tool()
 def synthesize(
     text: str,
     voice: str = "af_bella",

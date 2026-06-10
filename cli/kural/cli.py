@@ -16,6 +16,7 @@ from .client import (
     get_voices,
     import_clones,
     list_clones,
+    list_model_packs,
     synthesize,
 )
 
@@ -395,6 +396,83 @@ def voices_import(ctx: click.Context, archive_file: str) -> None:
                 f"{meta.get('duration_s', 0):.1f}s",
             )
         out_console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# models
+# ---------------------------------------------------------------------------
+
+@cli.command("models")
+@click.option(
+    "--host",
+    default=DEFAULT_HOST,
+    show_default=True,
+    envvar="KURAL_HOST",
+    help="Kural backend URL (env: KURAL_HOST).",
+)
+@click.option(
+    "--category",
+    type=click.Choice(["all", "tts", "asr", "translation"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Filter model packs by workflow category.",
+)
+def models(host: str, category: str) -> None:
+    """List local model packs and active background jobs.
+
+    This is read-only: install/update/remove actions stay in the desktop app
+    and backend API where license prompts and progress UI can be shown.
+    """
+    try:
+        payload = list_model_packs(host=host)
+    except httpx.ConnectError:
+        raise click.ClickException(
+            f"Cannot connect to backend at {host}. Is it running?"
+        )
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:200]
+        raise click.ClickException(f"Backend returned {exc.response.status_code}: {detail}")
+
+    packs = payload.get("packs", [])
+    if category != "all":
+        packs = [pack for pack in packs if pack.get("category") == category]
+
+    table = Table(title="Kural — Local Model Packs", show_lines=False, box=None)
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Category")
+    table.add_column("Status")
+    table.add_column("Version")
+    table.add_column("License")
+    table.add_column("Path", overflow="fold")
+
+    for pack in packs:
+        table.add_row(
+            pack.get("id", ""),
+            pack.get("category", ""),
+            str(pack.get("status", "")).replace("_", " "),
+            pack.get("version", ""),
+            pack.get("license") or "",
+            pack.get("installed_path") or "",
+        )
+
+    out_console.print(table)
+    out_console.print(f"\n[dim]{len(packs)} model pack(s)[/dim]")
+
+    jobs = payload.get("jobs") or []
+    if jobs:
+        job_table = Table(title="\nRecent Model Jobs", show_lines=False, box=None)
+        job_table.add_column("Kind")
+        job_table.add_column("Status")
+        job_table.add_column("Progress")
+        job_table.add_column("Message", overflow="fold")
+        for job in jobs[:5]:
+            job_table.add_row(
+                job.get("kind", ""),
+                job.get("status", ""),
+                f"{job.get('progress', 0)}%",
+                job.get("error") or job.get("message") or "",
+            )
+        out_console.print(job_table)
 
 
 def main() -> None:

@@ -17,6 +17,36 @@ function assetFileName(asset: AudioAsset): string {
   return `${cleanFileStem(asset.name || asset.text.slice(0, 48))}.${asset.format}`;
 }
 
+function provenanceFileName(asset: AudioAsset): string {
+  return `${cleanFileStem(asset.name || asset.text.slice(0, 48))}.provenance.json`;
+}
+
+function provenanceBlob(asset: AudioAsset): Blob {
+  return new Blob(
+    [
+      JSON.stringify(
+        {
+          app: "Kural",
+          kind: "synthetic-audio-provenance",
+          exportedAt: new Date().toISOString(),
+          assetId: asset.id,
+          projectId: asset.projectId,
+          name: asset.name,
+          voiceLabel: asset.voiceLabel,
+          language: asset.language,
+          format: asset.format,
+          bytes: asset.bytes,
+          controls: asset.controls,
+          text: asset.text,
+        },
+        null,
+        2
+      ),
+    ],
+    { type: "application/json" }
+  );
+}
+
 export function AudioLibrary(props: {
   assets: AudioAsset[];
   audioUrls: Record<string, string>;
@@ -35,9 +65,11 @@ export function AudioLibrary(props: {
       const savedPath = await saveAudioFileToFolder(fileName, asset.blob);
       if (!savedPath) {
         downloadBlob(asset.blob, fileName);
+        downloadBlob(provenanceBlob(asset), provenanceFileName(asset));
         setMessage("Desktop save is unavailable here, so the clip was downloaded instead.");
         return;
       }
+      await saveAudioFileToFolder(provenanceFileName(asset), provenanceBlob(asset));
       setSavedPaths((current) => ({ ...current, [asset.id]: savedPath }));
       setMessage(`Saved to ${savedPath}`);
     } catch (exc) {
@@ -80,7 +112,10 @@ export function AudioLibrary(props: {
                 type="button"
                 className="rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
                 aria-label={`Download clip: ${asset.name}`}
-                onClick={() => downloadBlob(asset.blob, assetFileName(asset))}
+                onClick={() => {
+                  downloadBlob(asset.blob, assetFileName(asset));
+                  downloadBlob(provenanceBlob(asset), provenanceFileName(asset));
+                }}
               >
                 Download
               </button>

@@ -34,6 +34,16 @@ class _FakeClient:
     def list_clones(self):
         return [{"id": "clone-1", "name": "My Voice", "language": "en-US"}]
 
+    def list_model_packs(self):
+        return {
+            "packs": [
+                {"id": "kokoro-v1-onnx", "category": "tts", "status": "ready"},
+                {"id": "faster-whisper", "category": "asr", "status": "not_configured"},
+            ],
+            "jobs": [{"id": "job-1", "kind": "model-pack:install:kokoro-v1-onnx"}],
+            "total": 2,
+        }
+
     def synthesize(self, text, *, voice="af_bella", voice_id=None, speed=1.0, fmt="wav"):
         self.calls.append(("synthesize", text, voice, voice_id, speed, fmt))
         return _wav_bytes()
@@ -74,6 +84,19 @@ def test_list_voices_filtered_by_language_prefix(fake):
 def test_list_cloned_voices(fake):
     clones = server.list_cloned_voices()
     assert clones[0]["id"] == "clone-1"
+
+
+def test_list_model_packs_filters_by_category(fake):
+    payload = server.list_model_packs(category="tts", include_jobs=False)
+
+    assert payload["total"] == 1
+    assert payload["packs"][0]["id"] == "kokoro-v1-onnx"
+    assert payload["jobs"] == []
+
+
+def test_list_model_packs_rejects_unknown_category(fake):
+    with pytest.raises(KuralBackendError, match="Unsupported category"):
+        server.list_model_packs(category="agents")
 
 
 def test_synthesize_writes_file_and_reports_path(fake, tmp_path):

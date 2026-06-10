@@ -4,6 +4,8 @@ from typing import Literal, Optional
 
 LocalModelCategory = Literal["tts", "asr", "translation"]
 LocalModelStatus = Literal["ready", "not_configured", "not_installed", "disabled", "error"]
+ModelPackAction = Literal["install", "update", "remove"]
+BackgroundJobStatus = Literal["queued", "running", "succeeded", "failed", "canceled"]
 
 
 class LocalModelInfo(BaseModel):
@@ -21,6 +23,43 @@ class LocalModelInfo(BaseModel):
 
 class LocalModelsResponse(BaseModel):
     models: list[LocalModelInfo]
+    total: int
+
+
+class BackgroundJob(BaseModel):
+    id: str
+    kind: str
+    status: BackgroundJobStatus
+    progress: int = Field(default=0, ge=0, le=100)
+    message: str = ""
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+
+
+class ModelPackInfo(BaseModel):
+    id: str
+    name: str
+    category: LocalModelCategory
+    provider: str
+    status: LocalModelStatus
+    version: str
+    source_url: Optional[str] = None
+    checksum: Optional[str] = None
+    license: Optional[str] = None
+    disk_size_mb: Optional[int] = None
+    installed_path: Optional[str] = None
+    languages: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    requires_confirmation: bool = False
+    non_commercial: bool = False
+    detail: Optional[str] = None
+    actions: list[ModelPackAction] = Field(default_factory=list)
+
+
+class ModelPacksResponse(BaseModel):
+    packs: list[ModelPackInfo]
+    jobs: list[BackgroundJob] = Field(default_factory=list)
     total: int
 
 

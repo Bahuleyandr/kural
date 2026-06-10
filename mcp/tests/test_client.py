@@ -51,3 +51,30 @@ def test_transcribe_rejects_missing_file(tmp_path):
     missing = tmp_path / "nope.wav"
     with pytest.raises(KuralBackendError, match="not found"):
         KuralClient().transcribe(missing)
+
+
+def test_list_model_packs_uses_model_pack_endpoint(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"packs": [{"id": "kokoro-v1-onnx"}], "jobs": [], "total": 1}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, path):
+            captured["path"] = path
+            return _Response()
+
+    monkeypatch.setattr(KuralClient, "_client", lambda _self: _Client())
+
+    assert KuralClient().list_model_packs()["total"] == 1
+    assert captured["path"] == "/api/model-packs"

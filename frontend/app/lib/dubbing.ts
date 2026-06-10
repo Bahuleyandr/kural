@@ -21,6 +21,7 @@ function makeSegment(
     id: createId("dub"),
     startMs,
     endMs: Math.max(endMs, startMs + 1000),
+    speaker: "Speaker 1",
     sourceText: text.trim(),
     targetText: text.trim(),
     sourceLanguage,
@@ -136,4 +137,54 @@ export function formatTime(ms: number): string {
   return `${hours.toString().padStart(2, "0")}:${minutes
     .toString()
     .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${millis.toString().padStart(3, "0")}`;
+}
+
+function srtTime(ms: number): string {
+  return formatTime(ms).replace(".", ",");
+}
+
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+export function exportSegmentsAsSrt(segments: DubbingSegment[]): string {
+  return segments
+    .map((segment, index) =>
+      [
+        String(index + 1),
+        `${srtTime(segment.startMs)} --> ${srtTime(segment.endMs)}`,
+        segment.targetText || segment.sourceText,
+      ].join("\n")
+    )
+    .join("\n\n");
+}
+
+export function exportSegmentsAsVtt(segments: DubbingSegment[]): string {
+  return `WEBVTT\n\n${segments
+    .map((segment) =>
+      [
+        `${formatTime(segment.startMs)} --> ${formatTime(segment.endMs)}`,
+        segment.targetText || segment.sourceText,
+      ].join("\n")
+    )
+    .join("\n\n")}\n`;
+}
+
+export function exportSegmentsAsCsv(segments: DubbingSegment[]): string {
+  const rows = [
+    "start_ms,end_ms,speaker,source_text,target_text,voice_id,status,notes",
+    ...segments.map((segment) =>
+      [
+        segment.startMs,
+        segment.endMs,
+        csvCell(segment.speaker || "Speaker 1"),
+        csvCell(segment.sourceText),
+        csvCell(segment.targetText),
+        csvCell(segment.voiceId),
+        csvCell(segment.status),
+        csvCell(segment.notes),
+      ].join(",")
+    ),
+  ];
+  return rows.join("\n");
 }

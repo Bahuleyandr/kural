@@ -14,6 +14,14 @@ type WindowWithWebkitAudioContext = Window &
     webkitAudioContext?: typeof AudioContext;
   };
 
+interface SampleScore {
+  duration: number;
+  peak: number;
+  rms: number;
+  score: number;
+  warnings: string[];
+}
+
 function formatSeconds(value: number): string {
   return `${value.toFixed(1)}s`;
 }
@@ -63,6 +71,49 @@ function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([view], { type: "audio/wav" });
 }
 
+async function scoreSample(file: File): Promise<SampleScore> {
+  const AudioContextCtor =
+    window.AudioContext || (window as WindowWithWebkitAudioContext).webkitAudioContext;
+  if (!AudioContextCtor) {
+    return {
+      duration: 0,
+      peak: 0,
+      rms: 0,
+      score: 0,
+      warnings: ["Audio analysis is not available in this browser."],
+    };
+  }
+  const context = new AudioContextCtor();
+  try {
+    const buffer = await context.decodeAudioData(await file.arrayBuffer());
+    const channel = buffer.getChannelData(0);
+    let peak = 0;
+    let sum = 0;
+    for (let i = 0; i < channel.length; i += 1) {
+      const value = Math.abs(channel[i]);
+      peak = Math.max(peak, value);
+      sum += value * value;
+    }
+    const rms = Math.sqrt(sum / Math.max(1, channel.length));
+    const warnings: string[] = [];
+    if (buffer.duration < CLONE_MIN_SECONDS) warnings.push("Sample is shorter than 5 seconds.");
+    if (buffer.duration > CLONE_MAX_SECONDS) warnings.push("Sample is longer than 30 seconds.");
+    if (peak > 0.98) warnings.push("Possible clipping detected.");
+    if (rms < 0.015) warnings.push("Recording level is very quiet.");
+    if (rms > 0.35) warnings.push("Recording level is very loud.");
+    const score = Math.max(
+      0,
+      100 -
+        warnings.length * 18 -
+        (buffer.duration >= 12 && buffer.duration <= 25 ? 0 : 10) -
+        (peak > 0.98 ? 15 : 0)
+    );
+    return { duration: buffer.duration, peak, rms, score, warnings };
+  } finally {
+    await context.close();
+  }
+}
+
 export function ClonePanel(props: {
   cloneBusy: boolean;
   cloneConsent: boolean;
@@ -103,6 +154,7 @@ export function ClonePanel(props: {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recorderMessage, setRecorderMessage] = useState("");
   const [sampleUrl, setSampleUrl] = useState("");
+  const [sampleScore, setSampleScore] = useState<SampleScore | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -247,11 +299,31 @@ export function ClonePanel(props: {
   useEffect(() => {
     if (!cloneFile) {
       setSampleUrl("");
+      setSampleScore(null);
       return undefined;
     }
     const url = URL.createObjectURL(cloneFile);
     setSampleUrl(url);
-    return () => URL.revokeObjectURL(url);
+    let cancelled = false;
+    void scoreSample(cloneFile)
+      .then((score) => {
+        if (!cancelled) setSampleScore(score);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSampleScore({
+            duration: 0,
+            peak: 0,
+            rms: 0,
+            score: 0,
+            warnings: ["Could not analyze this sample."],
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+      URL.revokeObjectURL(url);
+    };
   }, [cloneFile]);
 
   const selectedFileDetail = cloneFile
@@ -360,6 +432,45 @@ export function ClonePanel(props: {
               src={sampleUrl}
               aria-label="Selected clone sample preview"
             />
+          )}
+          {sampleScore && (
+            <div className="mt-3 rounded border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">Clone readiness</span>
+                <span
+                  className={`rounded border px-2 py-1 text-xs ${
+                    sampleScore.score >= 80
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : sampleScore.score >= 55
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-red-200 bg-red-50 text-red-800"
+                  }`}
+                >
+                  {sampleScore.score}/100
+                </span>
+              </div>
+              <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                <div>
+                  <dt>Length</dt>
+                  <dd>{formatSeconds(sampleScore.duration)}</dd>
+                </div>
+                <div>
+                  <dt>Peak</dt>
+                  <dd>{Math.round(sampleScore.peak * 100)}%</dd>
+                </div>
+                <div>
+                  <dt>Level</dt>
+                  <dd>{Math.round(sampleScore.rms * 100)}%</dd>
+                </div>
+              </dl>
+              {sampleScore.warnings.length > 0 && (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-700">
+                  {sampleScore.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
 

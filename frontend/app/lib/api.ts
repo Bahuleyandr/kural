@@ -83,6 +83,20 @@ export async function getDesktopDiagnostics(): Promise<DesktopDiagnostics | null
   return (await invoke("get_runtime_diagnostics")) as DesktopDiagnostics;
 }
 
+export async function restartLocalBackend(): Promise<boolean> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return false;
+  await invoke("restart_backend");
+  return true;
+}
+
+export async function openLocalLogs(): Promise<boolean> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_logs_folder");
+  return true;
+}
+
 export async function readApiError(res: Response): Promise<string> {
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {

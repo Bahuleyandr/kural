@@ -20,8 +20,8 @@ Privacy-first, cross-platform AI text-to-speech and dictation workstation. Runs 
 kural/
   backend/      # Python FastAPI service wrapping Kokoro, Chatterbox, and Supertonic
   frontend/     # Next.js creator workspace with projects, quality studio, dubbing, SSML, model packs, and audio library
-  cli/          # Python Click CLI: kural speak, kural voices
-  mcp/          # Model Context Protocol server: drive Kural from Claude Code, Cursor, etc.
+  cli/          # Python Click CLI: kural speak, kural voices, kural models
+  mcp/          # Model Context Protocol server: inspect voices/models and synthesize/transcribe
   desktop/      # Tauri cross-platform desktop app
   docker-compose.yml
 ```
@@ -128,6 +128,7 @@ cd cli
 pip install -e .
 kural speak "Hello, world!"
 kural voices --clones
+kural models
 ```
 
 **MCP server:**
@@ -154,7 +155,14 @@ kural-mcp   # runs over stdio; expects the backend on KURAL_HOST
 | POST | `/api/voices/clones/import` | Import cloned voices from a zip archive |
 | DELETE | `/api/voices/clones/{id}` | Delete a cloned voice |
 | GET | `/api/local-models` | Inspect optional local ASR/translation adapters |
+| GET | `/api/model-packs` | Inspect installable/removable local model packs and recent jobs |
+| POST | `/api/model-packs/{id}/install` | Queue a safe backend-defined model-pack install |
+| POST | `/api/model-packs/{id}/update` | Queue a safe backend-defined model-pack update |
+| DELETE | `/api/model-packs/{id}` | Queue removal of a Kural-managed model-pack folder |
+| GET | `/api/model-packs/jobs/{job_id}` | Inspect a model-pack background job |
+| DELETE | `/api/model-packs/jobs/{job_id}` | Cancel a queued/running model-pack job |
 | POST | `/api/transcribe` | Transcribe local audio/video into dubbing segments |
+| POST | `/api/align` | Align rendered segment audio for overrun checks and subtitle timing |
 | WS | `/api/transcribe/stream` | Incremental speech-to-text over WebSocket (Vosk-backed; powers the dictation widget) |
 | POST | `/api/translate` | Translate local script text with installed packages |
 | GET | `/api/health` | Health check (also exposed at `/healthz` for Docker) |
@@ -171,18 +179,18 @@ Kural assumes one user per backend process. The Kokoro and Chatterbox engines ar
 
 The creator UI stores projects locally in IndexedDB. A project can contain script documents, generated audio assets, voice presets, pronunciation profiles, and transcript-file dubbing segments. Use `.kuralproj` export/import when you want a portable offline archive.
 
-Optional ASR/translation runtimes are adapter-driven. Install `backend/requirements-local-models.txt`, provision model packs under the configured cache folders, then check `/api/local-models` before using audio/video import or local translation in the dubbing workspace. See `docs/LOCAL_MODELS.md` for a repeatable local setup.
+Optional ASR/translation runtimes are adapter-driven. Install `backend/requirements-local-models.txt`, provision model packs under the configured cache folders, then check `/api/local-models` or `/api/model-packs` before using audio/video import or local translation in the dubbing workspace. See `docs/LOCAL_MODELS.md` for a repeatable local setup.
 
 The workstation tabs are organised around day-to-day creator workflows:
 
 - **Write:** single, batch, SSML, performance style, and advanced audio controls.
 - **Quality:** A/B render the same line across styles and reuse the best settings.
 - **Voices:** engine inventory, cloned voices, and voice import/export.
-- **Models:** local pack readiness, install commands, and Kokoro first-run provisioning.
-- **Dubbing:** subtitle/audio imports, timeline overview, local translation, per-segment render, overrun warnings, and stitched WAV export.
+- **Models:** local pack readiness plus safe backend install/update/remove jobs for Kokoro, Supertonic, Chatterbox, Faster-Whisper, Vosk, Argos, IndicTrans2, and NLLB slots.
+- **Dubbing:** subtitle/audio imports, timeline overview, local translation, per-segment render, alignment checks, transcript export, overrun warnings, and stitched WAV export.
 - **Pronunciation:** ordered language-aware pronunciation rules with preview.
 - **Library:** local generated clips.
-- **Settings:** dictation controls, desktop diagnostics, and privacy/safety posture.
+- **Settings:** project vault, dictation controls, desktop diagnostics with repair actions, and privacy/safety posture.
 
 ## Developer commands
 
@@ -201,3 +209,4 @@ See `docs/API.md` for API examples, `docs/ROADMAP.md` for the staged product pla
 - Kural: MIT
 - Kokoro TTS: Apache 2.0
 - Chatterbox TTS: MIT
+- Supertonic TTS: MIT

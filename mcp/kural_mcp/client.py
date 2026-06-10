@@ -86,6 +86,15 @@ class KuralClient:
         except Exception as exc:
             raise _explain(self.host, exc) from exc
 
+    def list_model_packs(self) -> dict:
+        try:
+            with self._client() as client:
+                resp = client.get("/api/model-packs")
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as exc:
+            raise _explain(self.host, exc) from exc
+
     def synthesize(
         self,
         text: str,
