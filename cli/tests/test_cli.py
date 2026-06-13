@@ -1,3 +1,6 @@
+import json
+import zipfile
+
 from click.testing import CliRunner
 
 from kural import cli as cli_module
@@ -99,3 +102,33 @@ def test_models_lists_model_packs(monkeypatch):
     assert "kokoro-v1-onnx" in result.output
     assert "argos-translate" not in result.output
     assert "model-pack:install:kokoro-v1-onnx" in result.output
+
+
+def test_projects_inspect_summarizes_kuralproj(tmp_path):
+    archive = tmp_path / "sample.kuralproj"
+    manifest = {
+        "schemaVersion": 1,
+        "exportedAt": "2026-06-13T00:00:00Z",
+        "project": {
+            "id": "project-1",
+            "name": "Launch read",
+            "sourceLanguage": "en-US",
+            "targetLanguage": "hi-IN",
+            "tags": ["beta"],
+            "documents": [{"id": "doc-1"}],
+            "voicePresets": [{"id": "preset-1"}],
+            "pronunciationProfiles": [{"id": "pron-1"}],
+            "dubbingSegments": [{"id": "dub-1"}, {"id": "dub-2"}],
+        },
+        "assets": [{"id": "asset-1", "path": "audio/asset-1.wav"}],
+    }
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+
+    result = CliRunner().invoke(cli_module.cli, ["projects", "inspect", str(archive), "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["project_name"] == "Launch read"
+    assert payload["audio_assets"] == 1
+    assert payload["dubbing_segments"] == 2

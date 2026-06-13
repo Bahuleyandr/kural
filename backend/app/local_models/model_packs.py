@@ -38,6 +38,8 @@ class ModelPackManifest:
     install_kind: str
     requires_confirmation: bool = False
     non_commercial: bool = False
+    trust_level: str = "built_in"
+    recommended: bool = False
 
 
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -116,6 +118,7 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             languages=["en-US", "en-GB", "ja-JP", "fr-FR", "es-ES", "hi-IN"],
             capabilities=["tts", "ssml", "wav", "mp3", "advanced-controls"],
             install_kind="download-kokoro",
+            recommended=True,
         ),
         ModelPackManifest(
             id="supertonic-3-onnx",
@@ -132,6 +135,7 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             capabilities=["tts", "ssml", "wav", "mp3", "advanced-controls"],
             install_kind="download-supertonic",
             requires_confirmation=True,
+            recommended=True,
         ),
         ModelPackManifest(
             id="chatterbox-local",
@@ -148,6 +152,8 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             capabilities=["voice-clone", "wav", "watermark"],
             install_kind="manual-runtime",
             requires_confirmation=True,
+            trust_level="external_runtime",
+            recommended=True,
         ),
         ModelPackManifest(
             id="faster-whisper",
@@ -164,6 +170,7 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             capabilities=["transcribe", "segments", "cpu"],
             install_kind="provision-faster-whisper",
             requires_confirmation=True,
+            recommended=True,
         ),
         ModelPackManifest(
             id="vosk",
@@ -179,6 +186,7 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             languages=["model-dependent"],
             capabilities=["transcribe", "cpu", "small-models"],
             install_kind="manual-runtime",
+            trust_level="user_supplied",
         ),
         ModelPackManifest(
             id="argos-translate",
@@ -195,6 +203,7 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             capabilities=["translate", "offline", "package-pairs"],
             install_kind="provision-argos",
             requires_confirmation=True,
+            recommended=True,
         ),
         ModelPackManifest(
             id="indictrans2",
@@ -211,6 +220,7 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             capabilities=["translate", "offline"],
             install_kind="manual-runtime",
             requires_confirmation=True,
+            trust_level="user_supplied",
         ),
         ModelPackManifest(
             id="nllb-200",
@@ -228,6 +238,7 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             install_kind="manual-runtime",
             requires_confirmation=True,
             non_commercial=True,
+            trust_level="user_supplied",
         ),
     ]
 
@@ -241,6 +252,20 @@ def _manifest_by_id(pack_id: str) -> ModelPackManifest:
 
 def _latest_inventory_by_id() -> dict[str, dict]:
     return {model.id: model.model_dump() for model in local_model_inventory()}
+
+
+def _manifest_digest(manifest: ModelPackManifest) -> str:
+    payload = "|".join(
+        [
+            manifest.id,
+            manifest.version,
+            manifest.source_url or "",
+            manifest.checksum or "",
+            manifest.license,
+            ",".join(manifest.capabilities),
+        ]
+    )
+    return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
 
 def list_model_packs() -> list[ModelPackInfo]:
@@ -270,6 +295,9 @@ def list_model_packs() -> list[ModelPackInfo]:
                 capabilities=current.get("capabilities") or manifest.capabilities,
                 requires_confirmation=manifest.requires_confirmation,
                 non_commercial=manifest.non_commercial,
+                trust_level=manifest.trust_level,  # type: ignore[arg-type]
+                manifest_digest=_manifest_digest(manifest),
+                recommended=manifest.recommended,
                 detail=current.get("detail"),
                 actions=actions,
             )

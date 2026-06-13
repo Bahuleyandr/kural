@@ -33,6 +33,7 @@ export interface PronunciationProfile {
   name: string;
   language: string;
   previewText: string;
+  glossary?: Array<{ term: string; pronunciation: string; language: string; notes?: string }>;
   rules: PronunciationRule[];
   updatedAt: string;
 }
@@ -88,6 +89,8 @@ export interface KuralProject {
   archived: boolean;
   vaultPath?: string;
   lastOpenedAt?: string;
+  snapshotCount?: number;
+  lastSnapshotAt?: string;
   sourceLanguage: string;
   targetLanguage: string;
   createdAt: string;
@@ -275,9 +278,16 @@ function normalizeProject(project: KuralProject): KuralProject {
     ...project,
     tags: project.tags || [],
     archived: Boolean(project.archived),
+    snapshotCount: project.snapshotCount || 0,
     documents: project.documents || [],
     voicePresets: project.voicePresets || [],
-    pronunciationProfiles: project.pronunciationProfiles || [createDefaultPronunciationProfile()],
+    pronunciationProfiles: (project.pronunciationProfiles || [createDefaultPronunciationProfile()]).map(
+      (profile) => ({
+        ...profile,
+        glossary: profile.glossary || [],
+        rules: profile.rules || [],
+      })
+    ),
     dubbingSegments: (project.dubbingSegments || []).map((segment) => ({
       ...segment,
       speaker: segment.speaker || "Speaker 1",

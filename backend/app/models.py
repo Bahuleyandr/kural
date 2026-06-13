@@ -53,6 +53,11 @@ class ModelPackInfo(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     requires_confirmation: bool = False
     non_commercial: bool = False
+    trust_level: Optional[
+        Literal["built_in", "verified_manifest", "user_supplied", "external_runtime"]
+    ] = None
+    manifest_digest: Optional[str] = None
+    recommended: bool = False
     detail: Optional[str] = None
     actions: list[ModelPackAction] = Field(default_factory=list)
 

@@ -18,22 +18,23 @@
 - Optional ASR (faster-whisper, Vosk, whisper.cpp) and translation (Argos, IndicTrans2 pack, NLLB) adapters with `/api/local-models`, `/api/transcribe`, `/api/translate`.
 - Expanded SSML subset (pauses, emphasis, prosody fallback, phoneme fallback, pronunciation rules).
 - Advanced audio controls (speed, pitch, volume, normalization, silence trim, pause scaling, format).
-- Model Pack Manager v2 with local readiness by workflow and safe backend job APIs for install/update/remove where Kural owns the model folder.
-- Voice Quality Studio for side-by-side style renders, waveform/loudness inspection, notes, favourites, and applying the best control preset.
-- First-run Public Beta setup wizard covering local engine, Kokoro, clone runtime, offline dubbing packs, microphone permission, and sample project creation.
-- Dubbing Timeline view with speaker lanes, ready/overrun signalling, media transcription imports, per-segment render, translation, alignment checks, retry/render-all actions, transcript export, and WAV timeline export.
+- Model Pack Manager v2 with local readiness by workflow, recommended-pack filtering, trust labels, manifest digests, and safe backend job APIs for install/update/remove where Kural owns the model folder.
+- Voice Quality Studio for side-by-side style renders, waveform/loudness inspection, naturalness coaching, notes, favourites, and applying the best control preset.
+- First-run Public Beta setup wizard covering local engine, Kokoro, clone runtime, offline dubbing packs, microphone permission, sample project creation, restart-engine repair, and setup reset.
+- Dubbing Timeline view with speaker lanes, ready/overrun signalling, media transcription imports, split/merge editing, suggested-speed application, per-segment render, translation, alignment checks, retry/render-all actions, render-plan export, transcript export, and WAV timeline export.
 - Dictation settings for language hints, push-to-talk, auto-paste, echo cancellation, noise suppression, and trailing-space insertion.
 - Desktop diagnostics panel exposing local engine URL, runtime status, app data path, audio folder, startup errors, restart action, and logs-folder action.
-- Project Vault panel for local project search/tag/archive/duplicate posture and storage usage.
-- Privacy and safety panel showing local API posture, provenance sidecars, generated asset footprint, clone consent ledger, and ready local ASR/translation packs.
-- CLI/MCP read-only model-pack inventory.
+- Project Vault panel for local project search/tag/archive/duplicate posture, storage usage, and desktop vault snapshots.
+- Privacy and safety panel showing local API posture, provenance sidecars, generated asset footprint, exportable clone consent ledger, and ready local ASR/translation packs.
+- Pronunciation Studio JSON profile import/export and one-click preview rendering into the audio library.
+- CLI/MCP read-only model-pack inventory and `.kuralproj` archive inspection.
 - Single Python entrypoint (`desktop/scripts/build_desktop.py`) shared by all four installer/release shell wrappers.
 - Frontend split into `app/components/`, `app/hooks/`, `app/lib/` modules with a Next.js error boundary; `apiFetch` wraps `X-API-Key` injection; `useApi` hook offers abort + 5s cache.
 - A11y pass: skip link, `aria-live` regions for status and errors, `aria-pressed`/`aria-current` on toggle buttons, focus rings on every interactive element.
 
 ## Next
 
-- Persisted desktop project vault on disk in addition to IndexedDB, with user-selected vault folder and recent-project tracking.
+- User-selected desktop vault folder and recent-project tracking beyond the default app-data vault.
 - Full media export with muxed MP4 when ffmpeg is available.
 - Tauri updater signature validation in the release pipeline and OS signing once certificates are available.
 - Multilingual TTS adapter slots beyond Kokoro/Chatterbox/Supertonic (user-provided voice folders).

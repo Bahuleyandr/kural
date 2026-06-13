@@ -10,6 +10,7 @@ export function PrivacySafetyPanel(props: {
   clones: ClonedVoiceInfo[];
   assets: AudioAsset[];
   models: LocalModelInfo[];
+  onExportConsentLedger: () => void;
 }) {
   const cloneConsentCount = props.clones.filter((clone) => clone.consent_confirmed).length;
   const generatedBytes = props.assets.reduce((total, asset) => total + asset.bytes, 0);
@@ -33,6 +34,13 @@ export function PrivacySafetyPanel(props: {
         >
           {localOnly ? "Localhost API" : "Network API"}
         </span>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={props.onExportConsentLedger}
+        >
+          Export Ledger
+        </button>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded border border-slate-200 p-3">

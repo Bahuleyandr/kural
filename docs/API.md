@@ -152,7 +152,25 @@ The response includes `duration_ms`, optional `overrun_ms`, and word-level times
 
 ## Local Project Archives
 
-Project workspaces are frontend-local IndexedDB data. Exported `.kuralproj` files are zip archives with `manifest.json`, project metadata, pronunciation profiles, voice presets, dubbing segments, and referenced audio files. There is no backend project database in this phase.
+Project workspaces are frontend-local IndexedDB data. In desktop mode, the UI can also save `.kuralproj` snapshots into the local Project Vault folder. Exported `.kuralproj` files are zip archives with `manifest.json`, project metadata, pronunciation profiles, voice presets, dubbing segments, and referenced audio files. There is no backend project database in this phase.
+
+The CLI and MCP server can inspect portable project archives without extracting them:
+
+```bash
+kural projects inspect demo.kuralproj --json
+```
+
+The inspector validates archive member paths before reading `manifest.json`, then reports schema version, project name, language settings, tags, and counts for documents, audio assets, pronunciation profiles, voice presets, and dubbing segments.
+
+## Model Pack Metadata
+
+`GET /api/model-packs` returns safe backend-supported actions plus provenance fields:
+
+- `recommended`: whether the pack is part of the suggested Public Beta local setup.
+- `trust_level`: one of `built_in`, `verified_manifest`, `user_supplied`, or `external_runtime`.
+- `manifest_digest`: a stable `sha256:` digest over the local manifest identity, version, source, checksum, license, and capabilities.
+
+The UI uses these fields to filter recommended packs and show whether a pack comes from a bundled manifest, a user-supplied folder, or an external runtime such as Chatterbox.
 
 Delete a clone:
 

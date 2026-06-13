@@ -15,10 +15,13 @@ UI or CLI, not something an autonomous agent triggers. This server can
 """
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import wave
 from pathlib import Path
+from pathlib import PurePosixPath
+import zipfile
 
 from mcp.server.fastmcp import FastMCP
 
@@ -46,6 +49,43 @@ def _resolve_output_path(output_path: str, fmt: str) -> Path:
     fd, name = tempfile.mkstemp(prefix="kural_", suffix=f".{fmt}")
     os.close(fd)
     return Path(name)
+
+
+def _inspect_project_archive(path: Path) -> dict:
+    if not path.is_file():
+        raise KuralBackendError(f"Project archive does not exist: {path}")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                archive_path = PurePosixPath(name)
+                if archive_path.is_absolute() or ".." in archive_path.parts:
+                    raise KuralBackendError(f"Unsafe archive path: {name}")
+            try:
+                manifest = json.loads(archive.read("manifest.json"))
+            except KeyError:
+                raise KuralBackendError("Project archive is missing manifest.json.")
+    except zipfile.BadZipFile as exc:
+        raise KuralBackendError("Project archive is not a valid zip file.") from exc
+    except json.JSONDecodeError as exc:
+        raise KuralBackendError(f"Project archive manifest is not valid JSON: {exc}") from exc
+
+    project = manifest.get("project") or {}
+    assets = manifest.get("assets") or []
+    return {
+        "archive_file": str(path.resolve()),
+        "schema_version": manifest.get("schemaVersion"),
+        "exported_at": manifest.get("exportedAt"),
+        "project_id": project.get("id", ""),
+        "project_name": project.get("name", ""),
+        "source_language": project.get("sourceLanguage", ""),
+        "target_language": project.get("targetLanguage", ""),
+        "tags": project.get("tags") or [],
+        "documents": len(project.get("documents") or []),
+        "audio_assets": len(assets),
+        "voice_presets": len(project.get("voicePresets") or []),
+        "pronunciation_profiles": len(project.get("pronunciationProfiles") or []),
+        "dubbing_segments": len(project.get("dubbingSegments") or []),
+    }
 
 
 @mcp.tool()
@@ -115,6 +155,20 @@ def list_model_packs(category: str = "", include_jobs: bool = True) -> dict:
         "total": len(packs),
         "jobs": payload.get("jobs", []) if include_jobs else [],
     }
+
+
+@mcp.tool()
+def inspect_project_archive(archive_path: str) -> dict:
+    """Inspect a local .kuralproj archive without extracting it.
+
+    Args:
+        archive_path: Path to a portable Kural project archive.
+
+    Returns counts for documents, audio assets, pronunciation profiles,
+    voice presets, and dubbing segments. This is read-only and validates
+    archive member paths before reading the manifest.
+    """
+    return _inspect_project_archive(Path(archive_path).expanduser())
 
 
 @mcp.tool()

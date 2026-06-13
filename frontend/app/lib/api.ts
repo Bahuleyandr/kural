@@ -32,6 +32,8 @@ export interface DesktopDiagnostics {
   backendError: string | null;
   appDataDir: string | null;
   audioLibraryDir: string | null;
+  projectVaultDir: string | null;
+  logsDir: string | null;
 }
 
 /**
@@ -94,6 +96,30 @@ export async function openLocalLogs(): Promise<boolean> {
   const invoke = getTauriInvoke();
   if (!invoke) return false;
   await invoke("open_logs_folder");
+  return true;
+}
+
+export async function openProjectVaultFolder(): Promise<boolean> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_project_vault");
+  return true;
+}
+
+export async function saveProjectArchiveToVault(
+  fileName: string,
+  blob: Blob
+): Promise<string | null> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return null;
+  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+  return (await invoke("save_project_archive", { fileName, bytes })) as string;
+}
+
+export async function clearSetupState(): Promise<boolean> {
+  const invoke = getTauriInvoke();
+  if (!invoke) return false;
+  await invoke("clear_setup_state");
   return true;
 }
 

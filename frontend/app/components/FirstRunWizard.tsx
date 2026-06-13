@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { clearSetupState, restartLocalBackend } from "../lib/api";
 import type { ClonedVoiceInfo, LocalModelInfo } from "../lib/types";
 
 const DISMISS_KEY = "kural.firstRunWizard.dismissed.v1";
@@ -21,6 +22,7 @@ export function FirstRunWizard(props: {
 }) {
   const [dismissed, setDismissed] = useState(true);
   const [micStatus, setMicStatus] = useState("Not checked");
+  const [repairStatus, setRepairStatus] = useState("");
 
   useEffect(() => {
     setDismissed(window.localStorage.getItem(DISMISS_KEY) === "true");
@@ -84,6 +86,26 @@ export function FirstRunWizard(props: {
   function dismiss() {
     window.localStorage.setItem(DISMISS_KEY, "true");
     setDismissed(true);
+  }
+
+  async function restartEngine() {
+    try {
+      const restarted = await restartLocalBackend();
+      setRepairStatus(restarted ? "Local engine restarted." : "Restart is available in the desktop app.");
+      props.onRefresh();
+    } catch (exc) {
+      setRepairStatus(exc instanceof Error ? exc.message : "Could not restart the local engine.");
+    }
+  }
+
+  async function resetSetup() {
+    window.localStorage.removeItem(DISMISS_KEY);
+    try {
+      const cleared = await clearSetupState();
+      setRepairStatus(cleared ? "Setup state cleared." : "Setup state reset in this browser.");
+    } catch (exc) {
+      setRepairStatus(exc instanceof Error ? exc.message : "Could not reset setup state.");
+    }
   }
 
   return (
@@ -157,7 +179,26 @@ export function FirstRunWizard(props: {
         >
           Check Again
         </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={() => void restartEngine()}
+        >
+          Restart Engine
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={() => void resetSetup()}
+        >
+          Reset Setup
+        </button>
       </div>
+      {repairStatus && (
+        <p className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" role="status">
+          {repairStatus}
+        </p>
+      )}
     </section>
   );
 }

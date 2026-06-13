@@ -1,6 +1,9 @@
 """Kural CLI entry point."""
 
+import json
 import sys
+import zipfile
+from pathlib import Path, PurePosixPath
 
 import click
 import httpx
@@ -22,6 +25,43 @@ from .client import (
 
 err_console = Console(stderr=True)
 out_console = Console()
+
+
+def inspect_project_archive_file(archive_file: str | Path) -> dict:
+    """Return a safe summary of a portable .kuralproj archive."""
+    archive_path = Path(archive_file)
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            for name in archive.namelist():
+                path = PurePosixPath(name)
+                if path.is_absolute() or ".." in path.parts:
+                    raise click.ClickException(f"Unsafe archive path: {name}")
+            try:
+                manifest = json.loads(archive.read("manifest.json"))
+            except KeyError:
+                raise click.ClickException("Project archive is missing manifest.json.")
+    except zipfile.BadZipFile:
+        raise click.ClickException("Project archive is not a valid zip file.")
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(f"Project archive manifest is not valid JSON: {exc}")
+
+    project = manifest.get("project") or {}
+    assets = manifest.get("assets") or []
+    return {
+        "archive_file": str(archive_path),
+        "schema_version": manifest.get("schemaVersion"),
+        "exported_at": manifest.get("exportedAt"),
+        "project_id": project.get("id", ""),
+        "project_name": project.get("name", ""),
+        "source_language": project.get("sourceLanguage", ""),
+        "target_language": project.get("targetLanguage", ""),
+        "tags": project.get("tags") or [],
+        "documents": len(project.get("documents") or []),
+        "audio_assets": len(assets),
+        "voice_presets": len(project.get("voicePresets") or []),
+        "pronunciation_profiles": len(project.get("pronunciationProfiles") or []),
+        "dubbing_segments": len(project.get("dubbingSegments") or []),
+    }
 
 
 @click.group()
@@ -473,6 +513,35 @@ def models(host: str, category: str) -> None:
                 job.get("error") or job.get("message") or "",
             )
         out_console.print(job_table)
+
+
+# ---------------------------------------------------------------------------
+# projects
+# ---------------------------------------------------------------------------
+
+@cli.group("projects")
+def projects() -> None:
+    """Inspect portable Kural project archives."""
+
+
+@projects.command("inspect")
+@click.argument("archive_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--json", "as_json", is_flag=True, help="Print the summary as JSON.")
+def projects_inspect(archive_file: str, as_json: bool) -> None:
+    """Inspect a .kuralproj archive without extracting it."""
+    summary = inspect_project_archive_file(archive_file)
+    if as_json:
+        out_console.print_json(data=summary)
+        return
+
+    table = Table(title="Kural — Project Archive", show_lines=False, box=None)
+    table.add_column("Field", style="dim")
+    table.add_column("Value", overflow="fold")
+    for key, value in summary.items():
+        if isinstance(value, list):
+            value = ", ".join(map(str, value)) if value else ""
+        table.add_row(key.replace("_", " ").title(), str(value))
+    out_console.print(table)
 
 
 def main() -> None:

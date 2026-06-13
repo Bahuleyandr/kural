@@ -135,6 +135,9 @@ describe("ModelPackManager", () => {
                   capabilities: ["tts"],
                   requires_confirmation: false,
                   non_commercial: false,
+                  trust_level: "built_in",
+                  manifest_digest: "sha256:kma",
+                  recommended: true,
                   detail: null,
                   actions: ["install"],
                 },
@@ -154,6 +157,9 @@ describe("ModelPackManager", () => {
                   capabilities: ["transcribe"],
                   requires_confirmation: true,
                   non_commercial: false,
+                  trust_level: "verified_manifest",
+                  manifest_digest: "sha256:fw",
+                  recommended: true,
                   detail: null,
                   actions: ["install"],
                 },
@@ -173,6 +179,9 @@ describe("ModelPackManager", () => {
                   capabilities: ["translate"],
                   requires_confirmation: true,
                   non_commercial: false,
+                  trust_level: "verified_manifest",
+                  manifest_digest: "sha256:argos",
+                  recommended: true,
                   detail: null,
                   actions: ["install"],
                 },
@@ -235,6 +244,8 @@ describe("ModelPackManager", () => {
     expect(await screen.findByText(/tts packs/i)).toBeInTheDocument();
     const kokoroCard = screen.getByText("Kokoro v1.0 ONNX").closest("article");
     expect(kokoroCard).not.toBeNull();
+    expect(within(kokoroCard as HTMLElement).getByText(/recommended/i)).toBeInTheDocument();
+    expect(within(kokoroCard as HTMLElement).getByText(/built in/i)).toBeInTheDocument();
     await user.click(within(kokoroCard as HTMLElement).getByRole("button", { name: /install/i }));
     expect(fetchMock).toHaveBeenCalledWith(
       "http://backend/api/model-packs/kokoro-v1-onnx/install",
@@ -339,6 +350,8 @@ describe("SettingsView", () => {
         models={[]}
         projects={[project]}
         onUpdateProject={() => undefined}
+        onSaveProjectSnapshot={async () => undefined}
+        onExportConsentLedger={() => undefined}
       />
     );
     expect(screen.getByRole("heading", { name: /dictation settings/i })).toBeInTheDocument();

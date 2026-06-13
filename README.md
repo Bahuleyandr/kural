@@ -129,6 +129,7 @@ pip install -e .
 kural speak "Hello, world!"
 kural voices --clones
 kural models
+kural projects inspect ./demo.kuralproj
 ```
 
 **MCP server:**
@@ -177,20 +178,20 @@ The API is unauthenticated by default to keep the single-user offline workflow f
 
 Kural assumes one user per backend process. The Kokoro and Chatterbox engines are shared across requests via a thread-safe registry, and the cloned-voice cache lives at one location per process (`CLONE_CACHE_DIR`). For multi-tenant or LAN deployments, run one container per tenant — there is no built-in per-user isolation.
 
-The creator UI stores projects locally in IndexedDB. A project can contain script documents, generated audio assets, voice presets, pronunciation profiles, and transcript-file dubbing segments. Use `.kuralproj` export/import when you want a portable offline archive.
+The creator UI stores projects locally in IndexedDB and, in desktop mode, can save portable vault snapshots to the local Project Vault folder. A project can contain script documents, generated audio assets, voice presets, pronunciation profiles, and transcript-file dubbing segments. Use `.kuralproj` export/import when you want a portable offline archive; use `kural projects inspect` or the MCP `inspect_project_archive` tool to audit an archive without extracting it.
 
 Optional ASR/translation runtimes are adapter-driven. Install `backend/requirements-local-models.txt`, provision model packs under the configured cache folders, then check `/api/local-models` or `/api/model-packs` before using audio/video import or local translation in the dubbing workspace. See `docs/LOCAL_MODELS.md` for a repeatable local setup.
 
 The workstation tabs are organised around day-to-day creator workflows:
 
 - **Write:** single, batch, SSML, performance style, and advanced audio controls.
-- **Quality:** A/B render the same line across styles and reuse the best settings.
+- **Quality:** A/B render the same line across styles, inspect waveform/loudness cues, get naturalness coaching, and reuse the best settings.
 - **Voices:** engine inventory, cloned voices, and voice import/export.
-- **Models:** local pack readiness plus safe backend install/update/remove jobs for Kokoro, Supertonic, Chatterbox, Faster-Whisper, Vosk, Argos, IndicTrans2, and NLLB slots.
-- **Dubbing:** subtitle/audio imports, timeline overview, local translation, per-segment render, alignment checks, transcript export, overrun warnings, and stitched WAV export.
-- **Pronunciation:** ordered language-aware pronunciation rules with preview.
+- **Models:** local pack readiness, recommended-pack filtering, manifest trust metadata, and safe backend install/update/remove jobs for Kokoro, Supertonic, Chatterbox, Faster-Whisper, Vosk, Argos, IndicTrans2, and NLLB slots.
+- **Dubbing:** subtitle/audio imports, timeline overview, local translation, split/merge segment editing, per-segment render, alignment checks, render-plan export, transcript export, overrun warnings, and stitched WAV export.
+- **Pronunciation:** ordered language-aware pronunciation rules with preview render plus JSON profile import/export.
 - **Library:** local generated clips.
-- **Settings:** project vault, dictation controls, desktop diagnostics with repair actions, and privacy/safety posture.
+- **Settings:** project vault snapshots, dictation controls, desktop diagnostics with repair actions, privacy/safety posture, and exportable consent ledger.
 
 ## Developer commands
 

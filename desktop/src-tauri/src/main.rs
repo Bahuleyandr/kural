@@ -40,6 +40,8 @@ struct RuntimeDiagnostics {
     backend_error: Option<String>,
     app_data_dir: Option<String>,
     audio_library_dir: Option<String>,
+    project_vault_dir: Option<String>,
+    logs_dir: Option<String>,
 }
 
 // ── API key (per-install shared secret) ─────────────────────────────────────
@@ -399,6 +401,14 @@ fn get_runtime_diagnostics(
         audio_library_dir: default_audio_library_dir()
             .ok()
             .map(|path| path.display().to_string()),
+        project_vault_dir: paths
+            .app_data_dir
+            .as_ref()
+            .map(|path| default_project_vault_dir(path).display().to_string()),
+        logs_dir: paths
+            .app_data_dir
+            .as_ref()
+            .map(|path| default_logs_dir(path).display().to_string()),
     }
 }
 
@@ -439,9 +449,76 @@ fn open_logs_folder(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
         .app_data_dir
         .as_ref()
         .ok_or_else(|| "App data folder is unavailable.".to_string())?;
-    let logs_dir = app_data_dir.join("logs");
+    let logs_dir = default_logs_dir(app_data_dir);
     fs::create_dir_all(&logs_dir).map_err(|err| format!("Could not create logs folder: {err}"))?;
     open_path_in_file_manager(&logs_dir, false)
+}
+
+#[tauri::command]
+fn open_project_vault(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
+    let app_data_dir = paths
+        .app_data_dir
+        .as_ref()
+        .ok_or_else(|| "App data folder is unavailable.".to_string())?;
+    let vault_dir = default_project_vault_dir(app_data_dir);
+    fs::create_dir_all(&vault_dir)
+        .map_err(|err| format!("Could not create project vault folder: {err}"))?;
+    open_path_in_file_manager(&vault_dir, false)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn save_project_archive(
+    paths: tauri::State<RuntimePaths>,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("Project archive is empty.".to_string());
+    }
+    let app_data_dir = paths
+        .app_data_dir
+        .as_ref()
+        .ok_or_else(|| "App data folder is unavailable.".to_string())?;
+    let vault_dir = default_project_vault_dir(app_data_dir);
+    let snapshots_dir = vault_dir.join("snapshots");
+    fs::create_dir_all(&snapshots_dir)
+        .map_err(|err| format!("Could not create project snapshots folder: {err}"))?;
+    let mut safe_file_name = sanitize_file_name(&file_name);
+    if safe_file_name == "kural-audio.wav" {
+        safe_file_name = "kural-project.kuralproj".to_string();
+    }
+    if !safe_file_name.to_ascii_lowercase().ends_with(".kuralproj") {
+        safe_file_name.push_str(".kuralproj");
+    }
+    let output_path = unique_output_path(&snapshots_dir, &safe_file_name);
+    if !output_path.starts_with(&snapshots_dir) {
+        return Err("Refusing to save outside the project vault.".to_string());
+    }
+    fs::write(&output_path, bytes)
+        .map_err(|err| format!("Could not save project archive: {err}"))?;
+    Ok(output_path.display().to_string())
+}
+
+#[tauri::command]
+fn clear_setup_state(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
+    let app_data_dir = paths
+        .app_data_dir
+        .as_ref()
+        .ok_or_else(|| "App data folder is unavailable.".to_string())?;
+    let setup_state = app_data_dir.join("first_run_state.json");
+    if setup_state.exists() {
+        fs::remove_file(&setup_state)
+            .map_err(|err| format!("Could not clear setup state: {err}"))?;
+    }
+    Ok(())
+}
+
+fn default_logs_dir(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("logs")
+}
+
+fn default_project_vault_dir(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("project-vault")
 }
 
 fn default_audio_library_dir() -> Result<PathBuf, String> {
@@ -796,6 +873,9 @@ fn main() {
             get_runtime_diagnostics,
             restart_backend,
             open_logs_folder,
+            open_project_vault,
+            save_project_archive,
+            clear_setup_state,
             save_audio_file,
             reveal_path,
             dictation_paste

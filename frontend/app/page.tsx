@@ -21,7 +21,13 @@ import { SetupBanner } from "./components/SetupBanner";
 import { WorkspaceTabs } from "./components/WorkspaceTabs";
 import { useBackendStatus } from "./hooks/useBackendStatus";
 import { useWorkspace } from "./hooks/useWorkspace";
-import { apiFetch, getApiUrl, readApiError, rehydrateTauriGlobals } from "./lib/api";
+import {
+  apiFetch,
+  getApiUrl,
+  readApiError,
+  rehydrateTauriGlobals,
+  saveProjectArchiveToVault,
+} from "./lib/api";
 import {
   SYNTH_CHUNK_LIMIT,
   applyPronunciationPreview,
@@ -612,6 +618,99 @@ export default function Home() {
     });
   }
 
+  function exportActivePronunciationProfile() {
+    if (!activeProject || !activeProfile) return;
+    const payload = {
+      schemaVersion: 1,
+      kind: "kural-pronunciation-profile",
+      exportedAt: new Date().toISOString(),
+      projectName: activeProject.name,
+      profile: activeProfile,
+    };
+    downloadBlob(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+      `${activeProfile.name || "pronunciation-profile"}.json`
+    );
+  }
+
+  async function importPronunciationProfile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !activeProject) return;
+    try {
+      const raw = JSON.parse(await file.text());
+      const candidate = raw?.profile || raw;
+      if (!candidate || !Array.isArray(candidate.rules)) {
+        throw new Error("Pronunciation profile JSON must include a rules array.");
+      }
+      const profile: PronunciationProfile = {
+        id: createId("pron"),
+        name: `${String(candidate.name || file.name).replace(/\.json$/i, "")} import`,
+        language: String(candidate.language || activeProject.targetLanguage || ""),
+        previewText: String(candidate.previewText || ""),
+        glossary: Array.isArray(candidate.glossary)
+          ? candidate.glossary.map((item: Record<string, unknown>) => ({
+              term: String(item.term || ""),
+              pronunciation: String(item.pronunciation || ""),
+              language: String(item.language || candidate.language || activeProject.targetLanguage || ""),
+              notes: item.notes ? String(item.notes) : undefined,
+            }))
+          : [],
+        rules: candidate.rules.map((rule: Record<string, unknown>, index: number) => ({
+          id: createId("rule"),
+          pattern: String(rule.pattern || ""),
+          replacement: String(rule.replacement || ""),
+          mode: rule.mode === "literal" ? "literal" : "word",
+          caseSensitive: Boolean(rule.caseSensitive ?? rule.case_sensitive),
+          language: String(rule.language || ""),
+          enabled: rule.enabled !== false,
+          priority: Number(rule.priority || index + 1),
+        })),
+        updatedAt: new Date().toISOString(),
+      };
+      persistProject({
+        ...activeProject,
+        activePronunciationProfileId: profile.id,
+        pronunciationProfiles: [...activeProject.pronunciationProfiles, profile],
+      });
+      setSuccess(`Imported pronunciation profile ${profile.name}.`);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not import pronunciation profile.");
+    }
+  }
+
+  async function renderPronunciationPreview() {
+    if (!activeProject || !activeProfile) return;
+    const text = activeProfile.previewText.trim();
+    if (!text) {
+      setError("Add preview text before rendering pronunciation audio.");
+      return;
+    }
+    try {
+      setError("");
+      const { blob, format } = await synthesizeText(text);
+      const asset: AudioAsset = {
+        id: createId("asset"),
+        projectId: activeProject.id,
+        name: `Pronunciation preview - ${activeProfile.name}`,
+        text,
+        voiceLabel: selectedVoiceLabel(selectedVoiceKey),
+        format,
+        createdAt: new Date().toISOString(),
+        bytes: blob.size,
+        blob,
+        language: activeProject.targetLanguage,
+        controls,
+      };
+      await saveAudioAsset(asset);
+      setAssets((current) => [asset, ...current]);
+      setActiveView("library");
+      setSuccess("Rendered pronunciation preview to the audio library.");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not render pronunciation preview.");
+    }
+  }
+
   function saveVoicePreset() {
     if (!activeProject || !selectedVoiceKey) return;
     const parsed = parseVoiceKey(selectedVoiceKey);
@@ -839,6 +938,86 @@ export default function Home() {
     });
   }
 
+  function splitSegment(segment: DubbingSegment) {
+    if (!activeProject) return;
+    const midpoint = Math.max(segment.startMs + 500, Math.floor((segment.startMs + segment.endMs) / 2));
+    const sourceParts = segment.sourceText.split(/(?<=[.!?])\s+/);
+    const targetParts = segment.targetText.split(/(?<=[.!?])\s+/);
+    const sourceLeft =
+      sourceParts.length > 1 ? sourceParts.slice(0, Math.ceil(sourceParts.length / 2)).join(" ") : segment.sourceText;
+    const sourceRight =
+      sourceParts.length > 1 ? sourceParts.slice(Math.ceil(sourceParts.length / 2)).join(" ") : "";
+    const targetLeft =
+      targetParts.length > 1 ? targetParts.slice(0, Math.ceil(targetParts.length / 2)).join(" ") : segment.targetText;
+    const targetRight =
+      targetParts.length > 1 ? targetParts.slice(Math.ceil(targetParts.length / 2)).join(" ") : "";
+    const replacement: DubbingSegment[] = [
+      {
+        ...segment,
+        endMs: midpoint,
+        sourceText: sourceLeft,
+        targetText: targetLeft,
+        audioAssetId: undefined,
+        alignment: undefined,
+        status: "draft",
+      },
+      {
+        ...segment,
+        id: createId("dub"),
+        startMs: midpoint,
+        sourceText: sourceRight || segment.sourceText,
+        targetText: targetRight || segment.targetText,
+        audioAssetId: undefined,
+        alignment: undefined,
+        status: "draft",
+        notes: segment.notes ? `${segment.notes}; split` : "split",
+      },
+    ];
+    persistProject({
+      ...activeProject,
+      dubbingSegments: activeProject.dubbingSegments.flatMap((candidate) =>
+        candidate.id === segment.id ? replacement : [candidate]
+      ),
+    });
+  }
+
+  function mergeSegmentWithNext(segment: DubbingSegment) {
+    if (!activeProject) return;
+    const sorted = [...activeProject.dubbingSegments].sort((a, b) => a.startMs - b.startMs);
+    const index = sorted.findIndex((candidate) => candidate.id === segment.id);
+    const next = sorted[index + 1];
+    if (!next) return;
+    const merged: DubbingSegment = {
+      ...segment,
+      endMs: Math.max(segment.endMs, next.endMs),
+      sourceText: `${segment.sourceText.trim()} ${next.sourceText.trim()}`.trim(),
+      targetText: `${segment.targetText.trim()} ${next.targetText.trim()}`.trim(),
+      notes: [segment.notes, next.notes, "merged"].filter(Boolean).join("; "),
+      audioAssetId: undefined,
+      alignment: undefined,
+      status: "draft",
+    };
+    persistProject({
+      ...activeProject,
+      dubbingSegments: sorted.map((candidate) =>
+        candidate.id === segment.id ? merged : candidate
+      ).filter((candidate) => candidate.id !== next.id),
+    });
+  }
+
+  function applySuggestedSegmentSpeed(segment: DubbingSegment) {
+    if (!segment.alignment) return;
+    const slotMs = Math.max(1, segment.endMs - segment.startMs);
+    const suggested = Math.min(
+      2,
+      Math.max(0.5, segment.controls.speed * (segment.alignment.durationMs / slotMs))
+    );
+    updateSegment(segment.id, {
+      controls: { ...segment.controls, speed: Number(suggested.toFixed(2)) },
+      notes: `${segment.notes ? `${segment.notes}; ` : ""}Speed adjusted from alignment`,
+    });
+  }
+
   async function renderSegment(segment: DubbingSegment) {
     if (!activeProject) return;
     updateSegment(segment.id, { status: "rendering", error: undefined });
@@ -1009,6 +1188,48 @@ export default function Home() {
     downloadBlob(new Blob([text], { type: mime }), `${activeProject.name || "kural"}.${format}`);
   }
 
+  function exportDubbingRenderPlan() {
+    if (!activeProject) return;
+    const sorted = [...activeProject.dubbingSegments].sort((a, b) => a.startMs - b.startMs);
+    downloadBlob(
+      new Blob(
+        [
+          JSON.stringify(
+            {
+              schemaVersion: 1,
+              kind: "kural-dubbing-render-plan",
+              exportedAt: new Date().toISOString(),
+              projectId: activeProject.id,
+              projectName: activeProject.name,
+              targetLanguage: activeProject.targetLanguage,
+              ffmpeg: {
+                muxedMp4: "Use rendered WAV timeline plus original video in ffmpeg when available.",
+                commandHint:
+                  "ffmpeg -i original.mp4 -i kural-dubbing.wav -map 0:v:0 -map 1:a:0 -c:v copy -shortest dubbed.mp4",
+              },
+              segments: sorted.map((segment) => ({
+                id: segment.id,
+                startMs: segment.startMs,
+                endMs: segment.endMs,
+                speaker: segment.speaker,
+                voiceId: segment.voiceId,
+                sourceText: segment.sourceText,
+                targetText: segment.targetText,
+                status: segment.status,
+                audioAssetId: segment.audioAssetId,
+                alignment: segment.alignment,
+              })),
+            },
+            null,
+            2
+          ),
+        ],
+        { type: "application/json" }
+      ),
+      `${activeProject.name || "kural"}-render-plan.json`
+    );
+  }
+
   async function exportActiveProject() {
     if (!activeProject) return;
     try {
@@ -1017,6 +1238,73 @@ export default function Home() {
     } catch (exc) {
       setWorkspaceError(exc instanceof Error ? exc.message : "Could not export project");
     }
+  }
+
+  async function saveActiveProjectSnapshot() {
+    if (!activeProject) return;
+    const blob = await exportProjectArchive(activeProject, assets);
+    const fileName = `${activeProject.name || "kural"}-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")}.kuralproj`;
+    const savedPath = await saveProjectArchiveToVault(fileName, blob);
+    if (!savedPath) {
+      downloadBlob(blob, fileName);
+      setWorkspaceError("Desktop vault is unavailable here, so the snapshot was downloaded.");
+      return;
+    }
+    const next: KuralProject = {
+      ...activeProject,
+      vaultPath: savedPath,
+      lastSnapshotAt: new Date().toISOString(),
+      snapshotCount: (activeProject.snapshotCount || 0) + 1,
+    };
+    persistProject(next);
+    setSuccess(`Saved project snapshot to ${savedPath}`);
+  }
+
+  function exportConsentLedger() {
+    if (!activeProject) return;
+    const payload = {
+      schemaVersion: 1,
+      kind: "kural-consent-ledger",
+      exportedAt: new Date().toISOString(),
+      project: {
+        id: activeProject.id,
+        name: activeProject.name,
+        targetLanguage: activeProject.targetLanguage,
+        tags: activeProject.tags,
+      },
+      localRuntime: {
+        apiUrl,
+        localOnly: apiUrl.includes("127.0.0.1") || apiUrl.includes("localhost"),
+      },
+      clones: clones.map((clone) => ({
+        id: clone.id,
+        name: clone.name,
+        engine: clone.engine,
+        language: clone.language,
+        locale: clone.locale,
+        createdAt: clone.created_at,
+        durationSeconds: clone.duration_s,
+        consentConfirmed: Boolean(clone.consent_confirmed),
+        watermark: clone.watermark,
+        allowedUses: "project-notes",
+      })),
+      generatedAssets: assets.map((asset) => ({
+        id: asset.id,
+        name: asset.name,
+        voiceLabel: asset.voiceLabel,
+        language: asset.language,
+        format: asset.format,
+        bytes: asset.bytes,
+        createdAt: asset.createdAt,
+        dubbingSegmentId: asset.dubbingSegmentId,
+      })),
+    };
+    downloadBlob(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+      `${activeProject.name || "kural"}-consent-ledger.json`
+    );
   }
 
   async function importProjectFile(event: ChangeEvent<HTMLInputElement>) {
@@ -1550,13 +1838,17 @@ export default function Home() {
                   segments={activeProject.dubbingSegments}
                   voiceOptions={voiceOptions}
                   onExportTimeline={exportDubbingTimeline}
+                  onExportRenderPlan={exportDubbingRenderPlan}
                   onExportTranscript={exportDubbingTranscript}
                   onAlignSegment={(segment) => void alignSegment(segment)}
+                  onApplySuggestedSpeed={applySuggestedSegmentSpeed}
                   onImportMedia={transcribeMediaFile}
                   onImportTranscript={importTranscriptFile}
+                  onMergeWithNext={mergeSegmentWithNext}
                   onRenderAll={() => void renderAllSegments()}
                   onRenderSegment={(segment) => void renderSegment(segment)}
                   onRetryFailed={() => void retryFailedSegments()}
+                  onSplitSegment={splitSegment}
                   onTranslateAll={() => void translateAllSegments()}
                   onTranslateSegment={(segment) => void translateSegment(segment)}
                   onUpdateSegment={updateSegment}
@@ -1701,6 +1993,33 @@ export default function Home() {
                   >
                     {previewText}
                   </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+                      disabled={!activeProfile?.previewText.trim()}
+                      onClick={() => void renderPronunciationPreview()}
+                    >
+                      Render Preview
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+                      disabled={!activeProfile}
+                      onClick={exportActivePronunciationProfile}
+                    >
+                      Export Profile
+                    </button>
+                    <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-slate-400">
+                      Import Profile
+                      <input
+                        className="sr-only"
+                        type="file"
+                        accept="application/json,.json"
+                        onChange={(event) => void importPronunciationProfile(event)}
+                      />
+                    </label>
+                  </div>
                 </section>
               </div>
             )}
@@ -1727,6 +2046,8 @@ export default function Home() {
                   models={localModels}
                   projects={projects}
                   onUpdateProject={updateActiveProjectFields}
+                  onSaveProjectSnapshot={saveActiveProjectSnapshot}
+                  onExportConsentLedger={exportConsentLedger}
                 />
               </div>
             )}

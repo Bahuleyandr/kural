@@ -31,6 +31,11 @@ interface AudioAnalysis {
   bars: number[];
 }
 
+interface NaturalnessCoach {
+  score: number;
+  tips: string[];
+}
+
 async function analyzeAudio(blob: Blob): Promise<AudioAnalysis> {
   const context = new AudioContext();
   try {
@@ -78,6 +83,57 @@ function WaveformPreview({ analysis }: { analysis?: AudioAnalysis }) {
       ))}
     </div>
   );
+}
+
+function naturalnessCoach(
+  text: string,
+  controls: AudioControls,
+  analysis?: AudioAnalysis
+): NaturalnessCoach {
+  const tips: string[] = [];
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const sentenceCount = Math.max(1, (text.match(/[.!?]/g) || []).length);
+  const avgWords = words.length / sentenceCount;
+  const commaCount = (text.match(/,/g) || []).length;
+  let score = 100;
+
+  if (avgWords > 28) {
+    score -= 12;
+    tips.push("Split longer sentences so the model gets more natural breath points.");
+  }
+  if (commaCount === 0 && words.length > 35) {
+    score -= 8;
+    tips.push("Add commas or short pauses for pacing.");
+  }
+  if (/[A-Z]{8,}/.test(text)) {
+    score -= 8;
+    tips.push("Avoid long all-caps words unless the read should sound shouted.");
+  }
+  if (controls.speed > 1.18) {
+    score -= 8;
+    tips.push("Try a slower speed for a less mechanical delivery.");
+  }
+  if (controls.pauseScale < 0.8) {
+    score -= 7;
+    tips.push("Increase pause scale to give phrases more room.");
+  }
+  if (Math.abs(controls.pitchSemitones) > 3) {
+    score -= 6;
+    tips.push("Keep pitch shifts subtle for the most natural voice timbre.");
+  }
+  if (analysis?.peak && analysis.peak > 0.96) {
+    score -= 10;
+    tips.push("Peak level is close to clipping; lower volume or enable normalization.");
+  }
+  if (analysis?.rms && analysis.rms < 0.035) {
+    score -= 5;
+    tips.push("The sample is quiet; add a little gain or normalize before export.");
+  }
+  if (tips.length === 0) {
+    tips.push("Good pacing and level balance. Use A/B notes to choose the most human take.");
+  }
+
+  return { score: Math.max(0, Math.min(100, score)), tips };
 }
 
 export function QualityStudio(props: {
@@ -149,6 +205,10 @@ export function QualityStudio(props: {
   const selectedVoice = useMemo(
     () => props.voiceOptions.find((option) => option.key === voiceKey),
     [props.voiceOptions, voiceKey]
+  );
+  const liveCoach = useMemo(
+    () => naturalnessCoach(text, props.controls),
+    [text, props.controls]
   );
 
   async function renderStyle(style: PerformanceStyle) {
@@ -223,7 +283,24 @@ export function QualityStudio(props: {
       </div>
 
       <section className="rounded border border-slate-300 bg-white p-4">
-        <h3 className="font-semibold">Comparison set</h3>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Comparison set</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Naturalness score {liveCoach.score}/100 before rendering.
+            </p>
+          </div>
+          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Mastering targets: normalize voiceover, keep peaks below 96%, leave room-tone pauses.
+          </div>
+        </div>
+        <ul className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+          {liveCoach.tips.slice(0, 4).map((tip) => (
+            <li key={tip} className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+              {tip}
+            </li>
+          ))}
+        </ul>
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
           {props.performanceStyles.map((style) => (
             <label key={style.id} className="flex items-start gap-2 rounded border border-slate-200 p-3 text-sm">
@@ -273,6 +350,15 @@ export function QualityStudio(props: {
         <div className="mt-3 grid gap-3 xl:grid-cols-2">
           {results.map((result) => (
             <article key={result.id} className="rounded border border-slate-200 p-3">
+              {(() => {
+                const coach = naturalnessCoach(text, result.controls, analysis[result.id]);
+                return (
+                  <div className="mb-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    <span className="font-medium text-slate-800">Naturalness {coach.score}/100</span>
+                    <span className="ml-2">{coach.tips[0]}</span>
+                  </div>
+                );
+              })()}
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h4 className="font-medium">{result.label}</h4>

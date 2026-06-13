@@ -32,6 +32,11 @@ def test_model_pack_inventory_lists_public_beta_packs():
         "argos-translate",
         "indictrans2",
     }.issubset(ids)
+    kokoro = next(pack for pack in payload["packs"] if pack["id"] == "kokoro-v1-onnx")
+    assert kokoro["recommended"] is True
+    assert kokoro["trust_level"] == "built_in"
+    assert kokoro["manifest_digest"].startswith("sha256:")
+    assert all(pack["manifest_digest"].startswith("sha256:") for pack in payload["packs"])
     assert payload["total"] == len(payload["packs"])
 
 

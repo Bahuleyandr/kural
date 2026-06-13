@@ -14,6 +14,7 @@ running Kural backend over HTTP and never loads TTS/ASR models itself.
 | `list_voices` | List Kokoro and Supertonic voices, filterable by engine or language |
 | `list_cloned_voices` | List cloned voices saved in the backend |
 | `list_model_packs` | Read-only model-pack inventory with optional category filtering |
+| `inspect_project_archive` | Safely inspect a local `.kuralproj` manifest without extracting files |
 | `synthesize` | Synthesize text to a WAV/MP3 file with a built-in voice |
 | `synthesize_with_cloned_voice` | Synthesize text using an existing cloned voice |
 | `transcribe` | Transcribe a local audio/video file with offline ASR |
@@ -23,6 +24,10 @@ MCP write actions. Creating a cloned voice is consent-gated in Kural and
 stays a deliberate human action in the desktop app or CLI. Model
 downloads can involve large files or license gates, so MCP can inspect
 inventory but cannot install or remove packs.
+
+Project archive inspection is also read-only. It validates archive paths
+before reading `manifest.json` and returns counts for documents, audio
+assets, pronunciation profiles, voice presets, and dubbing segments.
 
 ## Installation
 
@@ -61,8 +66,9 @@ config):
 }
 ```
 
-Then ask Claude to "synthesize this paragraph with a Hindi voice" or
-"transcribe ~/clip.wav" and it will call the Kural backend.
+Then ask Claude to "synthesize this paragraph with a Hindi voice",
+"transcribe ~/clip.wav", or "inspect this Kural project archive" and it
+will call the appropriate Kural tool.
 
 ## Development
 

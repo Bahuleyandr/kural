@@ -69,6 +69,9 @@ function fallbackPacks(models: LocalModelInfo[]): ModelPackInfo[] {
     capabilities: model.capabilities || [],
     requires_confirmation: false,
     non_commercial: model.license?.includes("NC") ?? false,
+    trust_level: "external_runtime",
+    manifest_digest: null,
+    recommended: model.status === "ready",
     detail: model.detail,
     actions: [],
   }));
@@ -92,8 +95,10 @@ export function ModelPackManager(props: {
   const [busyPackId, setBusyPackId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [recommendedOnly, setRecommendedOnly] = useState(false);
 
-  const effectivePacks = packs.length > 0 ? packs : fallbackPacks(models);
+  const allPacks = packs.length > 0 ? packs : fallbackPacks(models);
+  const effectivePacks = recommendedOnly ? allPacks.filter((pack) => pack.recommended) : allPacks;
   const activeJobs = jobs.filter((job) => !TERMINAL.has(job.status));
   const ready = effectivePacks.filter((pack) => pack.status === "ready").length;
 
@@ -203,6 +208,14 @@ export function ModelPackManager(props: {
             <span className="rounded border border-slate-200 px-3 py-1 text-sm" aria-live="polite">
               {ready}/{effectivePacks.length} ready
             </span>
+            <label className="flex items-center gap-2 rounded border border-slate-300 px-3 py-1 text-sm">
+              <input
+                type="checkbox"
+                checked={recommendedOnly}
+                onChange={(event) => setRecommendedOnly(event.target.checked)}
+              />
+              Recommended
+            </label>
             <button
               type="button"
               className="rounded border border-slate-300 px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
@@ -216,7 +229,8 @@ export function ModelPackManager(props: {
           </div>
         </div>
         <p className="mt-2 text-sm text-slate-600">
-          Safe actions are backend-defined; the UI never runs arbitrary shell commands.
+          Safe actions are backend-defined; the UI never runs arbitrary shell commands. Trust labels
+          and manifest digests help you distinguish bundled manifests from user-supplied packs.
         </p>
         {(modelError || error) && (
           <p className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
@@ -296,7 +310,14 @@ export function ModelPackManager(props: {
               <article key={pack.id} className="rounded border border-slate-200 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h4 className="font-medium">{pack.name}</h4>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-medium">{pack.name}</h4>
+                      {pack.recommended && (
+                        <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
+                          recommended
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">
                       {pack.provider} / {pack.version} / {pack.license || "local"}
                     </p>
@@ -313,6 +334,14 @@ export function ModelPackManager(props: {
                   <div>
                     <dt className="font-medium text-slate-700">Checksum</dt>
                     <dd>{pack.checksum || "provider manifest"}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-slate-700">Trust</dt>
+                    <dd>{(pack.trust_level || "external_runtime").replace("_", " ")}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-slate-700">Manifest</dt>
+                    <dd>{pack.manifest_digest ? pack.manifest_digest.slice(0, 19) : "runtime reported"}</dd>
                   </div>
                 </dl>
                 {pack.installed_path && (

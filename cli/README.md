@@ -16,8 +16,14 @@ kural voices export voices.zip
 kural voices import voices.zip
 kural models                         # list local model packs and jobs
 kural models --category asr          # filter by tts/asr/translation
+kural projects inspect demo.kuralproj
+kural projects inspect demo.kuralproj --json
 kural speak "Hello" --voice-id <clone-id>
 ```
+
+`projects inspect` reads only `manifest.json` and validates archive member
+paths before reporting document, audio asset, pronunciation profile, voice
+preset, and dubbing segment counts. It does not extract project files.
 
 ## Installation
 

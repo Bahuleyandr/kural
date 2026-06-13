@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import io
+import json
 import wave
+import zipfile
 
 import pytest
 
@@ -97,6 +99,34 @@ def test_list_model_packs_filters_by_category(fake):
 def test_list_model_packs_rejects_unknown_category(fake):
     with pytest.raises(KuralBackendError, match="Unsupported category"):
         server.list_model_packs(category="agents")
+
+
+def test_inspect_project_archive_summarizes_manifest(fake, tmp_path):
+    archive = tmp_path / "demo.kuralproj"
+    manifest = {
+        "schemaVersion": 1,
+        "exportedAt": "2026-06-13T00:00:00Z",
+        "project": {
+            "id": "project-1",
+            "name": "Demo",
+            "sourceLanguage": "en-US",
+            "targetLanguage": "hi-IN",
+            "tags": ["local"],
+            "documents": [{"id": "doc-1"}],
+            "voicePresets": [],
+            "pronunciationProfiles": [{"id": "profile-1"}],
+            "dubbingSegments": [{"id": "dub-1"}],
+        },
+        "assets": [{"id": "asset-1", "path": "audio/asset-1.wav"}],
+    }
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+
+    summary = server.inspect_project_archive(str(archive))
+
+    assert summary["project_name"] == "Demo"
+    assert summary["audio_assets"] == 1
+    assert summary["pronunciation_profiles"] == 1
 
 
 def test_synthesize_writes_file_and_reports_path(fake, tmp_path):

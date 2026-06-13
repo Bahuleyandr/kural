@@ -22,7 +22,11 @@ export function DubbingTimeline(props: {
   onRenderAll: () => void;
   onRetryFailed: () => void;
   onAlignSegment: (segment: DubbingSegment) => void;
+  onSplitSegment: (segment: DubbingSegment) => void;
+  onMergeWithNext: (segment: DubbingSegment) => void;
+  onApplySuggestedSpeed: (segment: DubbingSegment) => void;
   onExportTimeline: () => void;
+  onExportRenderPlan: () => void;
   onExportTranscript: (format: "srt" | "vtt" | "csv") => void;
   onUpdateSegment: (segmentId: string, fields: Partial<DubbingSegment>) => void;
 }) {
@@ -104,6 +108,14 @@ export function DubbingTimeline(props: {
             onClick={props.onExportTimeline}
           >
             Export WAV Timeline
+          </button>
+          <button
+            type="button"
+            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+            disabled={props.segments.length === 0}
+            onClick={props.onExportRenderPlan}
+          >
+            Export Render Plan
           </button>
           {(["srt", "vtt", "csv"] as const).map((format) => (
             <button
@@ -217,6 +229,20 @@ export function DubbingTimeline(props: {
                   </button>
                   <button
                     type="button"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    onClick={() => props.onSplitSegment(segment)}
+                  >
+                    Split
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    onClick={() => props.onMergeWithNext(segment)}
+                  >
+                    Merge Next
+                  </button>
+                  <button
+                    type="button"
                     className="rounded bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
                     disabled={segment.status === "rendering"}
                     onClick={() => props.onRenderSegment(segment)}
@@ -319,6 +345,15 @@ export function DubbingTimeline(props: {
                     <p className="mt-2 line-clamp-2">
                       {segment.alignment.words.slice(0, 12).map((word) => word.text).join(" ")}
                     </p>
+                  )}
+                  {segment.alignment.overrunMs > 0 && (
+                    <button
+                      type="button"
+                      className="mt-2 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+                      onClick={() => props.onApplySuggestedSpeed(segment)}
+                    >
+                      Apply suggested speed
+                    </button>
                   )}
                 </div>
               )}

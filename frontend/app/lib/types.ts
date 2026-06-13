@@ -66,6 +66,9 @@ export interface ModelPackInfo {
   capabilities: string[];
   requires_confirmation: boolean;
   non_commercial: boolean;
+  trust_level?: "built_in" | "verified_manifest" | "user_supplied" | "external_runtime";
+  manifest_digest?: string | null;
+  recommended?: boolean;
   detail?: string | null;
   actions: ModelPackAction[];
 }
