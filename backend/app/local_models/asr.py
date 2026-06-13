@@ -13,6 +13,7 @@ class AsrSegment:
     start_ms: int
     end_ms: int
     text: str
+    speaker: str | None = None
 
 
 @dataclass(frozen=True)

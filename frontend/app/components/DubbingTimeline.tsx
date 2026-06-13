@@ -27,7 +27,9 @@ export function DubbingTimeline(props: {
   onApplySuggestedSpeed: (segment: DubbingSegment) => void;
   onApplySpeakerVoice: (speaker: string, voiceId: string) => void;
   onApplySpeakerSpeed: (speaker: string, speed: number) => void;
+  onInferSpeakers: () => void;
   onExportTimeline: () => void;
+  onExportMuxMp4: (event: ChangeEvent<HTMLInputElement>) => void;
   onExportRenderPlan: () => void;
   onExportMuxScript: () => void;
   onExportTranscript: (format: "srt" | "vtt" | "csv") => void;
@@ -116,11 +118,28 @@ export function DubbingTimeline(props: {
           </button>
           <button
             type="button"
+            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+            disabled={props.segments.length === 0}
+            onClick={props.onInferSpeakers}
+          >
+            Infer Speakers
+          </button>
+          <button
+            type="button"
             className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             onClick={props.onExportTimeline}
           >
             Export WAV Timeline
           </button>
+          <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-slate-400">
+            Export MP4
+            <input
+              className="hidden"
+              type="file"
+              accept="video/mp4,video/quicktime"
+              onChange={props.onExportMuxMp4}
+            />
+          </label>
           <button
             type="button"
             className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"

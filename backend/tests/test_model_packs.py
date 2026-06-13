@@ -43,6 +43,23 @@ def test_model_pack_inventory_lists_public_beta_packs():
     assert payload["total"] == len(payload["packs"])
 
 
+def test_model_pack_benchmarks_and_recommendation_are_available():
+    client = TestClient(app)
+    bench_res = client.get("/api/model-packs/benchmarks")
+
+    assert bench_res.status_code == 200
+    benchmarks = bench_res.json()["benchmarks"]
+    assert benchmarks
+    assert all(item["latency_ms_estimate"] >= 0 for item in benchmarks)
+    assert all(item["memory_mb_estimate"] >= 0 for item in benchmarks)
+
+    rec_res = client.get("/api/model-packs/recommend?language=en-US&capability=tts")
+    assert rec_res.status_code == 200
+    payload = rec_res.json()
+    assert payload["pack"]["category"] == "tts"
+    assert "best local score" in payload["reason"]
+
+
 def test_model_pack_unknown_pack_returns_structured_404():
     res = TestClient(app).post("/api/model-packs/nope/install")
 

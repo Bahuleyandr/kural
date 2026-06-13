@@ -67,6 +67,15 @@ describe("workspace storage", () => {
   test("exports and imports .kuralproj archives", async () => {
     const workspace = await loadWorkspace();
     const project = { ...workspace.projects[0], name: "Launch reads" };
+    project.scriptVersions = [
+      {
+        id: createId("scriptver"),
+        documentId: project.activeDocumentId,
+        label: "Version 1",
+        text: "Hello Kural",
+        createdAt: new Date().toISOString(),
+      },
+    ];
     await saveProject(project);
     const asset: AudioAsset = {
       id: createId("asset"),
@@ -87,6 +96,7 @@ describe("workspace storage", () => {
     const reloaded = await loadWorkspace();
 
     expect(imported.name).toContain("Launch reads");
+    expect(imported.scriptVersions).toHaveLength(1);
     expect(reloaded.projects).toHaveLength(2);
   });
 });

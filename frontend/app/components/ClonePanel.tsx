@@ -8,19 +8,49 @@ const CLONE_PROMPTS = [
   {
     id: "neutral",
     label: "Neutral proof",
+    language: "any",
+    accent: "general",
     text: "Hi, this is my Kural voice sample. I am speaking clearly at a natural pace, with steady volume and a quiet room. Today I will read a few short sentences, count from one to ten, and pause briefly between ideas so the app can learn my voice without background noise.",
   },
   {
     id: "range",
     label: "Expression range",
+    language: "any",
+    accent: "general",
     text: "This sample includes a calm sentence, a brighter sentence, and a slower closing line. I am keeping the same microphone distance while changing emotion gently, so Kural can hear my natural speaking range.",
   },
   {
     id: "consent",
     label: "Consent statement",
+    language: "any",
+    accent: "general",
     text: "I confirm that I own this voice or have permission to use it in Kural. This recording is for local voice cloning on this computer, and I understand that generated audio should be used responsibly.",
   },
+  {
+    id: "en-us-story",
+    label: "English US story",
+    language: "en-US",
+    accent: "US",
+    text: "When I record a voice sample, I keep the microphone steady and speak like I am telling a short story to one person. The room is quiet, my words are clear, and every sentence has a natural beginning and ending.",
+  },
+  {
+    id: "en-in-instruction",
+    label: "English India tutorial",
+    language: "en-IN",
+    accent: "India",
+    text: "This is a clean tutorial voice sample for Kural. First, I explain the topic clearly. Next, I pause for a moment. Finally, I close the sentence with the same natural tone and volume.",
+  },
+  {
+    id: "hi-in-consent",
+    label: "Hindi India consent",
+    language: "hi-IN",
+    accent: "India",
+    text: "Yeh meri awaaz ka sample hai. Main shaant jagah par saaf aur prakritik tareeke se bol raha hoon. Mujhe is awaaz ko Kural mein istemaal karne ki anumati hai.",
+  },
 ];
+const CLONE_ALLOWED_USES = ["personal", "commercial", "parody", "internal", "restricted"] as const;
+type CloneAllowedUse = (typeof CLONE_ALLOWED_USES)[number];
+type CloneTier = "quick" | "professional";
 
 type ClonePanelTab = "upload" | "record";
 
@@ -163,13 +193,18 @@ export function ClonePanel(props: {
   cloneLanguage: string;
   cloneMessage: string;
   cloneName: string;
+  cloneTier: CloneTier;
+  cloneAllowedUses: CloneAllowedUse[];
   clones: ClonedVoiceInfo[];
+  onCloneAllowedUsesChange: (value: CloneAllowedUse[]) => void;
   onCloneConsentChange: (value: boolean) => void;
   onCloneExport: () => void;
   onCloneFileChange: (value: File | null) => void;
   onCloneImport: (event: ChangeEvent<HTMLInputElement>) => void;
   onCloneLanguageChange: (value: string) => void;
   onCloneNameChange: (value: string) => void;
+  onCloneQualityScoreChange: (value: number | null) => void;
+  onCloneTierChange: (value: CloneTier) => void;
   onCloneUpload: () => void;
   onDeleteClone: (id: string) => void;
 }) {
@@ -180,13 +215,18 @@ export function ClonePanel(props: {
     cloneLanguage,
     cloneMessage,
     cloneName,
+    cloneTier,
+    cloneAllowedUses,
     clones,
+    onCloneAllowedUsesChange,
     onCloneConsentChange,
     onCloneExport,
     onCloneFileChange,
     onCloneImport,
     onCloneLanguageChange,
     onCloneNameChange,
+    onCloneQualityScoreChange,
+    onCloneTierChange,
     onCloneUpload,
     onDeleteClone,
   } = props;
@@ -198,6 +238,7 @@ export function ClonePanel(props: {
   const [sampleUrl, setSampleUrl] = useState("");
   const [sampleScore, setSampleScore] = useState<SampleScore | null>(null);
   const [promptId, setPromptId] = useState(CLONE_PROMPTS[0].id);
+  const [promptAccent, setPromptAccent] = useState("general");
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -343,6 +384,7 @@ export function ClonePanel(props: {
     if (!cloneFile) {
       setSampleUrl("");
       setSampleScore(null);
+      onCloneQualityScoreChange(null);
       return undefined;
     }
     const url = URL.createObjectURL(cloneFile);
@@ -350,7 +392,10 @@ export function ClonePanel(props: {
     let cancelled = false;
     void scoreSample(cloneFile)
       .then((score) => {
-        if (!cancelled) setSampleScore(score);
+        if (!cancelled) {
+          setSampleScore(score);
+          onCloneQualityScoreChange(score.score);
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -365,18 +410,28 @@ export function ClonePanel(props: {
             warnings: ["Could not analyze this sample."],
             strengths: [],
           });
+          onCloneQualityScoreChange(null);
         }
       });
     return () => {
       cancelled = true;
       URL.revokeObjectURL(url);
     };
-  }, [cloneFile]);
+  }, [cloneFile, onCloneQualityScoreChange]);
 
   const selectedFileDetail = cloneFile
     ? `${cloneFile.name} (${Math.max(1, Math.round(cloneFile.size / 1024))} KB)`
     : "No sample selected";
-  const activePrompt = CLONE_PROMPTS.find((prompt) => prompt.id === promptId) || CLONE_PROMPTS[0];
+  const visiblePrompts = CLONE_PROMPTS.filter(
+    (prompt) =>
+      prompt.language === "any" ||
+      prompt.language.toLowerCase() === cloneLanguage.toLowerCase() ||
+      prompt.accent.toLowerCase() === promptAccent.toLowerCase()
+  );
+  const activePrompt =
+    visiblePrompts.find((prompt) => prompt.id === promptId) ||
+    CLONE_PROMPTS.find((prompt) => prompt.id === promptId) ||
+    CLONE_PROMPTS[0];
   const readinessLabel =
     !sampleScore ? "No sample" : sampleScore.score >= 80 ? "Clone-ready" : sampleScore.score >= 55 ? "Needs cleanup" : "Retake recommended";
 
@@ -477,7 +532,7 @@ export function ClonePanel(props: {
                   value={promptId}
                   onChange={(event) => setPromptId(event.target.value)}
                 >
-                  {CLONE_PROMPTS.map((prompt) => (
+                  {visiblePrompts.map((prompt) => (
                     <option key={prompt.id} value={prompt.id}>
                       {prompt.label}
                     </option>
@@ -610,6 +665,55 @@ export function ClonePanel(props: {
             onChange={(event) => onCloneLanguageChange(event.target.value)}
           />
         </label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="block text-sm">
+            Clone tier
+            <select
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              value={cloneTier}
+              onChange={(event) => onCloneTierChange(event.target.value as CloneTier)}
+            >
+              <option value="quick">Quick clone</option>
+              <option value="professional">Professional clone pack</option>
+            </select>
+          </label>
+          <label className="block text-sm">
+            Recording accent
+            <select
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              value={promptAccent}
+              onChange={(event) => setPromptAccent(event.target.value)}
+            >
+              <option value="general">General</option>
+              <option value="US">US</option>
+              <option value="India">India</option>
+              <option value="UK">UK</option>
+            </select>
+          </label>
+        </div>
+        <fieldset className="rounded border border-slate-200 p-3 text-sm">
+          <legend className="px-1 font-medium">Allowed uses</legend>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {CLONE_ALLOWED_USES.map((use) => (
+              <label
+                key={use}
+                className="flex items-center gap-2 rounded border border-slate-200 px-2 py-1"
+              >
+                <input
+                  type="checkbox"
+                  checked={cloneAllowedUses.includes(use)}
+                  onChange={(event) => {
+                    const next = event.target.checked
+                      ? [...cloneAllowedUses, use]
+                      : cloneAllowedUses.filter((item) => item !== use);
+                    onCloneAllowedUsesChange(next.length ? next : ["personal"]);
+                  }}
+                />
+                <span className="capitalize">{use}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -657,10 +761,36 @@ export function ClonePanel(props: {
       <div className="mt-4 space-y-2">
         {clones.map((clone) => (
           <div key={clone.id} className="rounded border border-slate-200 px-3 py-2 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span>
-                {clone.name} {clone.language ? `(${clone.language})` : ""}
-              </span>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span className="font-medium">
+                  {clone.name} {clone.language ? `(${clone.language})` : ""}
+                </span>
+                <dl className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                  <div>
+                    <dt>Tier</dt>
+                    <dd className="capitalize">{clone.clone_tier || "quick"}</dd>
+                  </div>
+                  <div>
+                    <dt>Quality</dt>
+                    <dd>{clone.quality_score ?? "-"} / 100</dd>
+                  </div>
+                  <div>
+                    <dt>Allowed</dt>
+                    <dd>{(clone.allowed_uses || ["personal"]).join(", ")}</dd>
+                  </div>
+                  <div>
+                    <dt>Consent</dt>
+                    <dd>{clone.consent_confirmed ? "confirmed" : "missing"}</dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt>Sample hash</dt>
+                    <dd className="break-all font-mono">
+                      {clone.sample_sha256?.slice(0, 32) || "-"}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
               <button
                 type="button"
                 className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400"

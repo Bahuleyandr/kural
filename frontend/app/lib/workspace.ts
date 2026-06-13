@@ -57,6 +57,14 @@ export interface ProjectDocument {
   updatedAt: string;
 }
 
+export interface ScriptVersion {
+  id: string;
+  label: string;
+  documentId: string;
+  text: string;
+  createdAt: string;
+}
+
 export interface DubbingSegment {
   id: string;
   startMs: number;
@@ -101,6 +109,7 @@ export interface KuralProject {
   voicePresets: VoicePreset[];
   pronunciationProfiles: PronunciationProfile[];
   dubbingSegments: DubbingSegment[];
+  scriptVersions: ScriptVersion[];
 }
 
 export interface AudioAsset {
@@ -270,6 +279,7 @@ export function createProject(name = "Untitled project"): KuralProject {
     voicePresets: [],
     pronunciationProfiles: [profile],
     dubbingSegments: [],
+    scriptVersions: [],
   };
 }
 
@@ -281,6 +291,7 @@ function normalizeProject(project: KuralProject): KuralProject {
     snapshotCount: project.snapshotCount || 0,
     documents: project.documents || [],
     voicePresets: project.voicePresets || [],
+    scriptVersions: project.scriptVersions || [],
     pronunciationProfiles: (project.pronunciationProfiles || [createDefaultPronunciationProfile()]).map(
       (profile) => ({
         ...profile,

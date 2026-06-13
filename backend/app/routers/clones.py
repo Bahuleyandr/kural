@@ -56,6 +56,20 @@ async def clone_voice(
         False,
         description="Must be true to confirm consent to clone this voice.",
     ),
+    allowed_uses: list[str] | None = Form(
+        None,
+        description="Allowed-use labels for this voice: personal, commercial, parody, internal, restricted.",
+    ),
+    clone_tier: str = Form(
+        "quick",
+        description="Clone tier requested by the creator: quick or professional.",
+    ),
+    quality_score: int | None = Form(
+        None,
+        ge=0,
+        le=100,
+        description="Optional local clone-readiness score from the recorder.",
+    ),
 ) -> ClonedVoiceInfo:
     """Upload an audio sample and create a persistent cloned voice."""
     clean_name = name.strip()
@@ -109,6 +123,9 @@ async def clone_voice(
                 clean_name,
                 consent_confirmed=True,
                 language=language.strip() if language else None,
+                allowed_uses=allowed_uses,
+                clone_tier=clone_tier,
+                quality_score=quality_score,
             ),
         )
     except ValueError as exc:

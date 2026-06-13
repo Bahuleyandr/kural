@@ -27,12 +27,16 @@ Kural reports optional local ASR and translation adapters without downloading mo
 
 ```bash
 curl http://localhost:8000/api/model-packs
+curl http://localhost:8000/api/model-packs/benchmarks
+curl "http://localhost:8000/api/model-packs/recommend?language=en-US&capability=tts"
 curl -X POST http://localhost:8000/api/model-packs/kokoro-v1-onnx/install
 curl -X POST http://localhost:8000/api/model-packs/faster-whisper/update
 curl -X DELETE http://localhost:8000/api/model-packs/jobs/<job-id>
 ```
 
-The model-pack API is the only path the UI uses for installs/removals. Each action is a backend-defined safe operation; the browser never runs arbitrary shell commands. Pack records include `id`, `version`, `source_url`, `checksum`, `license`, `disk_size_mb`, `installed_path`, `languages`, `capabilities`, `requires_confirmation`, `non_commercial`, and supported `actions`.
+The model-pack API is the only path the UI uses for installs/removals. Each action is a backend-defined safe operation; the browser never runs arbitrary shell commands. Pack records include `id`, `version`, `source_url`, `checksum`, `license`, `disk_size_mb`, `installed_path`, `languages`, `capabilities`, `requires_confirmation`, `non_commercial`, compatibility metadata, provenance requirements, and supported `actions`.
+
+`/api/model-packs/benchmarks` returns local benchmark estimates for quality, naturalness, language quality, latency, memory, and best-fit routing hints. `/api/model-packs/recommend` returns the best current pack for a requested language and capability using readiness, quality, latency, and routing hints.
 
 Background jobs use one shared shape:
 
@@ -112,11 +116,14 @@ Voice cloning is consent-gated and local-only. Samples must be WAV/MP3, 5-30 sec
 curl -X POST http://localhost:8000/api/voices/clone \
   -F "name=My Voice" \
   -F "language=en-US" \
+  -F "allowed_uses=personal" \
+  -F "clone_tier=quick" \
+  -F "quality_score=86" \
   -F "consent_confirmed=true" \
   -F "file=@sample.wav"
 ```
 
-Clone and built-in voice metadata include `language`, optional `locale`, `engine`, and `capabilities` so the UI can filter voices and prepare for future local multilingual model packs.
+Clone and built-in voice metadata include `language`, optional `locale`, `engine`, and `capabilities` so the UI can filter voices and prepare for future local multilingual model packs. Clone metadata also includes `sample_sha256`, `allowed_uses`, `clone_tier`, and optional `quality_score` for the local identity card and consent ledger.
 
 ## Local Translation And Transcription
 
@@ -149,6 +156,28 @@ curl -X POST http://localhost:8000/api/align \
 ```
 
 The response includes `duration_ms`, optional `overrun_ms`, and word-level timestamps when the local aligner can provide them. If ASR alignment is unavailable, Kural returns `503` with `detail.code="alignment_unavailable"`.
+
+Direct MP4 dubbing export is available when `ffmpeg` is installed on the backend host:
+
+```bash
+curl -X POST http://localhost:8000/api/mux \
+  -F "original=@original.mp4" \
+  -F "dubbed_audio=@kural-dubbing.wav" \
+  -F "output_name=dubbed.mp4" \
+  --output dubbed.mp4
+```
+
+The mux command is fixed server-side (`-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -shortest`). If ffmpeg is missing, Kural returns `503` with `detail.code="ffmpeg_unavailable"`.
+
+## Local Agent
+
+Kural Agents v1 is local and deterministic. It returns workflow guidance and tool-plan tags that the frontend can speak through the existing local TTS pipeline:
+
+```bash
+curl -X POST http://localhost:8000/api/agent/respond \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Help me clone a voice","project_language":"en-US"}'
+```
 
 ## Local Project Archives
 

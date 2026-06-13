@@ -5,8 +5,11 @@ import type {
   BackgroundJob,
   LocalModelInfo,
   ModelPackAction,
+  ModelPackBenchmark,
+  ModelPackBenchmarksResponse,
   ModelPackInfo,
   ModelPacksResponse,
+  ModelRouteRecommendation,
 } from "../lib/types";
 
 const WORKFLOW_UNLOCKS = [
@@ -99,6 +102,10 @@ export function ModelPackManager(props: {
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [recommendedOnly, setRecommendedOnly] = useState(false);
+  const [benchmarks, setBenchmarks] = useState<ModelPackBenchmark[]>([]);
+  const [recommendation, setRecommendation] = useState<ModelRouteRecommendation | null>(null);
+  const [routeLanguage, setRouteLanguage] = useState("en-US");
+  const [routeCapability, setRouteCapability] = useState("tts");
 
   const allPacks = packs.length > 0 ? packs : fallbackPacks(models);
   const effectivePacks = recommendedOnly ? allPacks.filter((pack) => pack.recommended) : allPacks;
@@ -133,12 +140,28 @@ export function ModelPackManager(props: {
       const data = (await res.json()) as ModelPacksResponse;
       setPacks(data.packs || []);
       setJobs(data.jobs || []);
+      const [benchmarkRes, recommendationRes] = await Promise.all([
+        apiFetch(`${apiUrl}/api/model-packs/benchmarks`, { signal }),
+        apiFetch(
+          `${apiUrl}/api/model-packs/recommend?language=${encodeURIComponent(
+            routeLanguage
+          )}&capability=${encodeURIComponent(routeCapability)}`,
+          { signal }
+        ),
+      ]);
+      if (benchmarkRes.ok) {
+        const benchmarkData = (await benchmarkRes.json()) as ModelPackBenchmarksResponse;
+        setBenchmarks(benchmarkData.benchmarks || []);
+      }
+      if (recommendationRes.ok) {
+        setRecommendation((await recommendationRes.json()) as ModelRouteRecommendation);
+      }
       setError(null);
     } catch (exc) {
       if (signal?.aborted) return;
       setError(exc instanceof Error ? exc.message : "Could not load model packs.");
     }
-  }, [apiUrl]);
+  }, [apiUrl, routeCapability, routeLanguage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -293,6 +316,44 @@ export function ModelPackManager(props: {
             workstation {workstationScore}/100
           </span>
         </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+          <label className="text-sm">
+            Language
+            <input
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              value={routeLanguage}
+              onChange={(event) => setRouteLanguage(event.target.value)}
+            />
+          </label>
+          <label className="text-sm">
+            Capability
+            <select
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              value={routeCapability}
+              onChange={(event) => setRouteCapability(event.target.value)}
+            >
+              <option value="tts">Text to speech</option>
+              <option value="voice-clone">Voice clone</option>
+              <option value="transcribe">Transcription</option>
+              <option value="translate">Translation</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="self-end rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+            onClick={() => void loadModelPacks()}
+          >
+            Route
+          </button>
+        </div>
+        {recommendation && (
+          <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            <span className="font-medium">
+              Best route: {recommendation.pack?.name || "not installed yet"}
+            </span>
+            <p className="mt-1">{recommendation.reason}</p>
+          </div>
+        )}
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           {bestPacks.map((pack) => (
             <div key={pack.id} className="rounded border border-slate-200 bg-slate-50 p-3 text-sm">
@@ -306,6 +367,41 @@ export function ModelPackManager(props: {
               </p>
             </div>
           ))}
+        </div>
+        {benchmarks.length > 0 && (
+          <div className="mt-3 grid gap-2 xl:grid-cols-2">
+            {benchmarks.slice(0, 6).map((benchmark) => (
+              <div key={benchmark.id} className="rounded border border-slate-200 p-3 text-xs text-slate-600">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-slate-800">{benchmark.name}</span>
+                  <span>{benchmark.measured ? "measured" : "estimated"}</span>
+                </div>
+                <dl className="mt-2 grid grid-cols-4 gap-2">
+                  <div>
+                    <dt>Natural</dt>
+                    <dd>{benchmark.naturalness_score}</dd>
+                  </div>
+                  <div>
+                    <dt>Language</dt>
+                    <dd>{benchmark.language_quality}</dd>
+                  </div>
+                  <div>
+                    <dt>Latency</dt>
+                    <dd>{benchmark.latency_ms_estimate}ms</dd>
+                  </div>
+                  <div>
+                    <dt>Memory</dt>
+                    <dd>{benchmark.memory_mb_estimate}MB</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          <span className="font-medium">Community pack foundation:</span>{" "}
+          importable community packs must ship a verified manifest, checksum, license,
+          compatibility block, and consent/provenance notes before Kural will show install actions.
         </div>
       </section>
 
@@ -391,6 +487,18 @@ export function ModelPackManager(props: {
                     <dt className="font-medium text-slate-700">Latency</dt>
                     <dd>{pack.latency_tier || "manual"}</dd>
                   </div>
+                  <div>
+                    <dt className="font-medium text-slate-700">RAM</dt>
+                    <dd>
+                      {typeof pack.compatibility?.ram_mb === "number"
+                        ? `${pack.compatibility.ram_mb} MB`
+                        : "unknown"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-slate-700">GPU</dt>
+                    <dd>{String(pack.compatibility?.gpu ?? "optional")}</dd>
+                  </div>
                 </dl>
                 {pack.installed_path && (
                   <p className="mt-2 break-all text-xs text-slate-500">Path: {pack.installed_path}</p>
@@ -404,6 +512,11 @@ export function ModelPackManager(props: {
                 {pack.non_commercial && (
                   <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
                     Non-commercial license gate. Confirm eligibility before installing.
+                  </p>
+                )}
+                {pack.provenance_required && (
+                  <p className="mt-2 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-800">
+                    Consent and provenance required for community voice use.
                   </p>
                 )}
                 {pack.detail && <p className="mt-2 text-sm text-slate-700">{pack.detail}</p>}

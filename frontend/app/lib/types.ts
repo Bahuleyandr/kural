@@ -21,6 +21,10 @@ export interface ClonedVoiceInfo {
   language?: string | null;
   locale?: string | null;
   capabilities?: string[];
+  sample_sha256?: string | null;
+  allowed_uses?: Array<"personal" | "commercial" | "parody" | "internal" | "restricted">;
+  clone_tier?: "quick" | "professional";
+  quality_score?: number | null;
 }
 
 export interface LocalModelInfo {
@@ -72,6 +76,9 @@ export interface ModelPackInfo {
   quality_score?: number;
   latency_tier?: "realtime" | "interactive" | "batch" | "manual";
   routing_hints?: string[];
+  compatibility?: Record<string, string | number | boolean | string[]>;
+  community_pack?: boolean;
+  provenance_required?: boolean;
   detail?: string | null;
   actions: ModelPackAction[];
 }
@@ -80,6 +87,33 @@ export interface ModelPacksResponse {
   packs: ModelPackInfo[];
   jobs: BackgroundJob[];
   total: number;
+}
+
+export interface ModelPackBenchmark {
+  id: string;
+  name: string;
+  category: LocalModelInfo["category"];
+  status: LocalModelInfo["status"];
+  quality_score: number;
+  naturalness_score: number;
+  language_quality: number;
+  latency_ms_estimate: number;
+  memory_mb_estimate: number;
+  best_for: string[];
+  measured: boolean;
+  detail?: string | null;
+}
+
+export interface ModelPackBenchmarksResponse {
+  benchmarks: ModelPackBenchmark[];
+  total: number;
+}
+
+export interface ModelRouteRecommendation {
+  language: string;
+  capability: string;
+  pack?: ModelPackInfo | null;
+  reason: string;
 }
 
 export interface AlignmentWord {
@@ -104,6 +138,7 @@ export interface TranscriptionSegmentResponse {
   start_ms: number;
   end_ms: number;
   text: string;
+  speaker?: string | null;
 }
 
 export interface TranscriptionResponse {
@@ -121,6 +156,7 @@ export type WorkspaceView =
   | "models"
   | "dubbing"
   | "pronunciation"
+  | "agent"
   | "library"
   | "settings";
 export type VoiceKind = "kokoro" | "supertonic" | "clone";

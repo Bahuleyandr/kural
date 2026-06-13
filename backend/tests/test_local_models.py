@@ -99,7 +99,7 @@ def test_transcribe_returns_segments(monkeypatch):
             text="hello world",
             provider="faster-whisper",
             language="en",
-            segments=[SimpleNamespace(start_ms=100, end_ms=900, text="hello world")],
+            segments=[SimpleNamespace(start_ms=100, end_ms=900, text="hello world", speaker="Narrator")],
         )
 
     monkeypatch.setattr(local_models_router, "transcribe_audio", transcribe)
@@ -115,8 +115,23 @@ def test_transcribe_returns_segments(monkeypatch):
         "text": "hello world",
         "language": "en",
         "provider": "faster-whisper",
-        "segments": [{"start_ms": 100, "end_ms": 900, "text": "hello world"}],
+        "segments": [{"start_ms": 100, "end_ms": 900, "text": "hello world", "speaker": "Narrator"}],
     }
+
+
+def test_mux_reports_ffmpeg_unavailable(monkeypatch):
+    monkeypatch.setattr(local_models_router.shutil, "which", lambda _name: None)
+
+    res = TestClient(app).post(
+        "/api/mux",
+        files={
+            "original": ("original.mp4", b"video", "video/mp4"),
+            "dubbed_audio": ("dub.wav", b"RIFFdata", "audio/wav"),
+        },
+    )
+
+    assert res.status_code == 503
+    assert res.json()["detail"]["code"] == "ffmpeg_unavailable"
 
 
 # ── Streaming transcription (WebSocket) ────────────────────────────────────

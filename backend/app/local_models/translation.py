@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 from pathlib import Path
 
@@ -203,6 +204,19 @@ def _translate_nllb(_req: TranslationRequest) -> tuple[str, str]:
     raise LocalModelUnavailable("NLLB runtime is not enabled in this build.")
 
 
+def _apply_glossary(text: str, req: TranslationRequest) -> str:
+    output = text
+    target = _lang_code(req.target_language)
+    for item in req.glossary:
+        item_language = _lang_code(item.language or req.target_language)
+        if item_language and item_language != target:
+            continue
+        flags = 0 if item.case_sensitive else re.IGNORECASE
+        pattern = re.escape(item.term)
+        output = re.sub(pattern, item.replacement, output, flags=flags)
+    return output
+
+
 def translate_text(req: TranslationRequest) -> tuple[str, str]:
     provider = req.provider
     if provider == "auto":
@@ -210,14 +224,17 @@ def translate_text(req: TranslationRequest) -> tuple[str, str]:
 
     if provider in {"auto", "argos"}:
         try:
-            return _translate_argos(req)
+            text, used = _translate_argos(req)
+            return _apply_glossary(text, req), used
         except LocalModelUnavailable:
             if provider == "argos":
                 raise
 
     if provider == "indictrans2":
-        return _translate_indictrans2(req)
+        text, used = _translate_indictrans2(req)
+        return _apply_glossary(text, req), used
     if provider == "nllb":
-        return _translate_nllb(req)
+        text, used = _translate_nllb(req)
+        return _apply_glossary(text, req), used
 
     raise LocalModelUnavailable("No local translation provider is ready. Install Argos packages or configure a model pack.")

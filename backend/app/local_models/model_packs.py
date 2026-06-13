@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..config import settings
-from ..models import BackgroundJob, ModelPackAction, ModelPackInfo
+from ..models import BackgroundJob, ModelPackAction, ModelPackBenchmark, ModelPackInfo
 from .registry import local_model_inventory
 
 
@@ -43,6 +43,9 @@ class ModelPackManifest:
     quality_score: int = 0
     latency_tier: str = "manual"
     routing_hints: tuple[str, ...] = ()
+    compatibility: dict[str, str | int | bool | list[str]] | None = None
+    community_pack: bool = False
+    provenance_required: bool = False
 
 
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -125,6 +128,13 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=82,
             latency_tier="interactive",
             routing_hints=("default-tts", "long-form", "offline-english"),
+            compatibility={
+                "cpu": "x64/arm64",
+                "gpu": False,
+                "ram_mb": 2048,
+                "languages": ["en-US", "en-GB", "ja-JP", "fr-FR", "es-ES", "hi-IN"],
+                "features": ["tts", "ssml", "mp3", "wav"],
+            },
         ),
         ModelPackManifest(
             id="supertonic-3-onnx",
@@ -145,6 +155,13 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=86,
             latency_tier="interactive",
             routing_hints=("multilingual-tts", "scripted-dubbing", "style-controls"),
+            compatibility={
+                "cpu": "x64/arm64",
+                "gpu": False,
+                "ram_mb": 4096,
+                "languages": ["multilingual"],
+                "features": ["tts", "styles", "advanced-controls"],
+            },
         ),
         ModelPackManifest(
             id="chatterbox-local",
@@ -166,6 +183,14 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=78,
             latency_tier="batch",
             routing_hints=("voice-clone", "consent-required", "wav-only"),
+            compatibility={
+                "cpu": "x64",
+                "gpu": "optional",
+                "ram_mb": 6144,
+                "languages": ["multilingual"],
+                "features": ["voice-clone", "consent-ledger", "wav"],
+            },
+            provenance_required=True,
         ),
         ModelPackManifest(
             id="faster-whisper",
@@ -186,6 +211,13 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=84,
             latency_tier="batch",
             routing_hints=("media-transcription", "dubbing-import", "speaker-workflow"),
+            compatibility={
+                "cpu": "x64/arm64",
+                "gpu": "optional",
+                "ram_mb": 4096,
+                "languages": ["multilingual"],
+                "features": ["asr", "segments", "alignment"],
+            },
         ),
         ModelPackManifest(
             id="vosk",
@@ -205,6 +237,13 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=70,
             latency_tier="realtime",
             routing_hints=("dictation", "low-resource", "streaming-asr"),
+            compatibility={
+                "cpu": "x64/arm64",
+                "gpu": False,
+                "ram_mb": 1024,
+                "languages": ["model-dependent"],
+                "features": ["streaming-asr", "dictation"],
+            },
         ),
         ModelPackManifest(
             id="argos-translate",
@@ -225,6 +264,13 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=72,
             latency_tier="interactive",
             routing_hints=("offline-translation", "glossary-assisted", "lightweight"),
+            compatibility={
+                "cpu": "x64/arm64",
+                "gpu": False,
+                "ram_mb": 2048,
+                "languages": ["en->hi", "hi->en", "en->bn", "bn->en", "en->es", "es->en"],
+                "features": ["translation", "glossary"],
+            },
         ),
         ModelPackManifest(
             id="indictrans2",
@@ -245,6 +291,13 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=80,
             latency_tier="batch",
             routing_hints=("indic-translation", "dubbing-localization", "large-model"),
+            compatibility={
+                "cpu": "x64",
+                "gpu": "recommended",
+                "ram_mb": 8192,
+                "languages": ["English<->22 Indian languages"],
+                "features": ["translation", "indic-localization"],
+            },
         ),
         ModelPackManifest(
             id="nllb-200",
@@ -266,6 +319,13 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             quality_score=76,
             latency_tier="batch",
             routing_hints=("many-languages", "research-license", "large-model"),
+            compatibility={
+                "cpu": "x64",
+                "gpu": "recommended",
+                "ram_mb": 8192,
+                "languages": ["200 languages"],
+                "features": ["translation", "non-commercial-license"],
+            },
         ),
     ]
 
@@ -328,11 +388,96 @@ def list_model_packs() -> list[ModelPackInfo]:
                 quality_score=manifest.quality_score,
                 latency_tier=manifest.latency_tier,  # type: ignore[arg-type]
                 routing_hints=list(manifest.routing_hints),
+                compatibility=manifest.compatibility or {},
+                community_pack=manifest.community_pack,
+                provenance_required=manifest.provenance_required,
                 detail=current.get("detail"),
                 actions=actions,
             )
         )
     return packs
+
+
+def _language_matches(pack: ModelPackInfo, language: str) -> bool:
+    if not language:
+        return True
+    wanted = language.lower()
+    for candidate in pack.languages:
+        lowered = candidate.lower()
+        if lowered in {"multilingual", "model-dependent", "200 languages"}:
+            return True
+        if wanted == lowered or wanted.split("-")[0] == lowered.split("-")[0]:
+            return True
+        if "->" in lowered and wanted.split("-")[0] in lowered.split("->"):
+            return True
+    return False
+
+
+def _capability_matches(pack: ModelPackInfo, capability: str) -> bool:
+    wanted = capability.lower().strip()
+    if not wanted:
+        return True
+    if wanted in pack.capabilities:
+        return True
+    return any(wanted in hint.lower() for hint in pack.routing_hints)
+
+
+def recommend_model_pack(language: str = "", capability: str = "tts") -> tuple[ModelPackInfo | None, str]:
+    candidates = [
+        pack
+        for pack in list_model_packs()
+        if _language_matches(pack, language) and _capability_matches(pack, capability)
+    ]
+    if not candidates:
+        return None, "No local model pack advertises that language and capability yet."
+
+    status_bonus = {"ready": 30, "not_configured": 5, "not_installed": 0, "disabled": -20, "error": -30}
+    latency_bonus = {"realtime": 12, "interactive": 10, "batch": 4, "manual": 0}
+    candidates.sort(
+        key=lambda pack: (
+            pack.quality_score + status_bonus.get(pack.status, 0) + latency_bonus.get(pack.latency_tier or "manual", 0),
+            pack.recommended,
+        ),
+        reverse=True,
+    )
+    winner = candidates[0]
+    reason = (
+        f"{winner.name} has the best local score for {capability} in {language or 'any language'} "
+        f"based on quality, readiness, latency tier, and routing hints."
+    )
+    return winner, reason
+
+
+def benchmark_model_packs() -> list[ModelPackBenchmark]:
+    latency_ms = {"realtime": 120, "interactive": 650, "batch": 2500, "manual": 0}
+    memory_default = {"tts": 2048, "asr": 4096, "translation": 4096}
+    benchmarks: list[ModelPackBenchmark] = []
+    for pack in list_model_packs():
+        compatibility_ram = pack.compatibility.get("ram_mb") if pack.compatibility else None
+        memory_mb = int(compatibility_ram) if isinstance(compatibility_ram, int) else memory_default[pack.category]
+        language_quality = min(
+            100,
+            pack.quality_score
+            + (8 if any(language.lower() in {"multilingual", "200 languages"} for language in pack.languages) else 0)
+            + (5 if pack.status == "ready" else 0),
+        )
+        benchmarks.append(
+            ModelPackBenchmark(
+                id=pack.id,
+                name=pack.name,
+                category=pack.category,
+                status=pack.status,
+                quality_score=pack.quality_score,
+                naturalness_score=min(100, pack.quality_score + (4 if pack.category == "tts" else 0)),
+                language_quality=language_quality,
+                latency_ms_estimate=latency_ms.get(pack.latency_tier or "manual", 0),
+                memory_mb_estimate=memory_mb,
+                best_for=pack.routing_hints[:4],
+                measured=pack.status == "ready",
+                detail=pack.detail,
+            )
+        )
+    return sorted(benchmarks, key=lambda item: item.quality_score, reverse=True)
 
 
 def list_jobs() -> list[BackgroundJob]:

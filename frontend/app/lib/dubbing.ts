@@ -15,13 +15,14 @@ function makeSegment(
   endMs: number,
   text: string,
   sourceLanguage: string,
-  targetLanguage: string
+  targetLanguage: string,
+  speaker = "Speaker 1"
 ): DubbingSegment {
   return {
     id: createId("dub"),
     startMs,
     endMs: Math.max(endMs, startMs + 1000),
-    speaker: "Speaker 1",
+    speaker,
     sourceText: text.trim(),
     targetText: text.trim(),
     sourceLanguage,
@@ -31,6 +32,19 @@ function makeSegment(
     status: "draft",
     notes: "",
   };
+}
+
+export function inferSpeakerFromText(value: string): { speaker: string; text: string } {
+  const trimmed = value.trim();
+  const bracket = trimmed.match(/^\[([^\]]{1,40})\]\s*([\s\S]+)$/);
+  if (bracket) {
+    return { speaker: bracket[1].trim(), text: bracket[2].trim() };
+  }
+  const colon = trimmed.match(/^([A-Za-z][\w .'-]{0,38}|SPEAKER\s*\d{1,2})\s*:\s+([\s\S]+)$/i);
+  if (colon) {
+    return { speaker: colon[1].trim(), text: colon[2].trim() };
+  }
+  return { speaker: "Speaker 1", text: trimmed };
 }
 
 function parseSubtitleBlocks(text: string, sourceLanguage: string, targetLanguage: string) {
@@ -47,9 +61,16 @@ function parseSubtitleBlocks(text: string, sourceLanguage: string, targetLanguag
       const timingIndex = lines.findIndex((line) => line.includes("-->"));
       if (timingIndex < 0) return null;
       const [start, end] = lines[timingIndex].split("-->").map((part) => part.trim().split(/\s+/)[0]);
-      const caption = lines.slice(timingIndex + 1).join(" ");
-      if (!caption) return null;
-      return makeSegment(parseTimecode(start), parseTimecode(end), caption, sourceLanguage, targetLanguage);
+      const caption = inferSpeakerFromText(lines.slice(timingIndex + 1).join(" "));
+      if (!caption.text) return null;
+      return makeSegment(
+        parseTimecode(start),
+        parseTimecode(end),
+        caption.text,
+        sourceLanguage,
+        targetLanguage,
+        caption.speaker
+      );
     })
     .filter((segment): segment is DubbingSegment => Boolean(segment));
 }
@@ -85,6 +106,7 @@ function parseCsv(text: string, sourceLanguage: string, targetLanguage: string) 
   const dataRows = hasHeader ? rows.slice(1) : rows;
   const startIndex = hasHeader ? Math.max(header.indexOf("start_ms"), header.indexOf("start")) : 0;
   const endIndex = hasHeader ? Math.max(header.indexOf("end_ms"), header.indexOf("end")) : 1;
+  const speakerIndex = hasHeader ? Math.max(header.indexOf("speaker"), header.indexOf("speaker_name")) : -1;
   const textIndex = hasHeader
     ? Math.max(header.indexOf("target_text"), header.indexOf("source_text"), header.indexOf("text"))
     : 2;
@@ -95,9 +117,20 @@ function parseCsv(text: string, sourceLanguage: string, targetLanguage: string) 
       const start = startIndex >= 0 ? row[startIndex] : "";
       const end = endIndex >= 0 ? row[endIndex] : "";
       const textCell = textIndex >= 0 ? row[textIndex] : row[row.length - 1];
+      const speaker = speakerIndex >= 0 ? row[speakerIndex] : "";
       const startMs = /^\d+$/.test(start) ? Number(start) : parseTimecode(start) || fallbackStart;
       const endMs = /^\d+$/.test(end) ? Number(end) : parseTimecode(end) || startMs + 2500;
-      return textCell ? makeSegment(startMs, endMs, textCell, sourceLanguage, targetLanguage) : null;
+      const inferred = inferSpeakerFromText(textCell || "");
+      return textCell
+        ? makeSegment(
+            startMs,
+            endMs,
+            inferred.text,
+            sourceLanguage,
+            targetLanguage,
+            speaker || inferred.speaker
+          )
+        : null;
     })
     .filter((segment): segment is DubbingSegment => Boolean(segment));
 }
@@ -107,9 +140,17 @@ function parsePlainText(text: string, sourceLanguage: string, targetLanguage: st
     .split(/\n\s*\n/g)
     .map((part) => part.trim())
     .filter(Boolean)
-    .map((part, index) =>
-      makeSegment(index * 3000, index * 3000 + Math.max(1500, part.length * 60), part, sourceLanguage, targetLanguage)
-    );
+    .map((part, index) => {
+      const inferred = inferSpeakerFromText(part);
+      return makeSegment(
+        index * 3000,
+        index * 3000 + Math.max(1500, inferred.text.length * 60),
+        inferred.text,
+        sourceLanguage,
+        targetLanguage,
+        inferred.speaker
+      );
+    });
 }
 
 export function parseTranscript(

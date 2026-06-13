@@ -3,13 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 
 import type { Mode } from "../lib/types";
-
-interface ScriptVersion {
-  id: string;
-  label: string;
-  text: string;
-  createdAt: string;
-}
+import type { ScriptVersion } from "../lib/workspace";
 
 const SSML_CHIPS = [
   { label: "Pause 300ms", value: '<break time="300ms"/>' },
@@ -45,13 +39,16 @@ export function ScriptStudio(props: {
   text: string;
   mode: Mode;
   ssmlEnabled: boolean;
+  versions: ScriptVersion[];
   onTextChange: (value: string) => void;
+  onGenerateSelection: (value: string) => void;
+  onRestoreVersion: (version: ScriptVersion) => void;
+  onSaveVersion: () => void;
   onSsmlEnabledChange: (value: boolean) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
-  const [versions, setVersions] = useState<ScriptVersion[]>([]);
   const stats = useMemo(() => analyzeScript(props.text), [props.text]);
 
   function insertSnippet(snippet: string) {
@@ -86,18 +83,6 @@ export function ScriptStudio(props: {
     props.onTextChange(props.text.replace(new RegExp(escaped, "gi"), replaceText));
   }
 
-  function saveVersion() {
-    setVersions((current) => [
-      {
-        id: `${Date.now()}`,
-        label: `Version ${current.length + 1}`,
-        text: props.text,
-        createdAt: new Date().toISOString(),
-      },
-      ...current.slice(0, 9),
-    ]);
-  }
-
   function cleanupScript() {
     props.onTextChange(
       props.text
@@ -107,6 +92,38 @@ export function ScriptStudio(props: {
         .replace(/\n{3,}/g, "\n\n")
         .trim()
     );
+  }
+
+  function splitParagraphs() {
+    props.onTextChange(
+      props.text
+        .split(/(?<=[.!?])\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join("\n\n")
+    );
+  }
+
+  function mergeLines() {
+    props.onTextChange(
+      props.text
+        .split(/\n+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join(" ")
+    );
+  }
+
+  function selectedTextOrLine(): string {
+    const textarea = textareaRef.current;
+    if (!textarea) return props.text.trim();
+    const { selectionStart, selectionEnd } = textarea;
+    if (selectionEnd > selectionStart) {
+      return props.text.slice(selectionStart, selectionEnd).trim();
+    }
+    const before = props.text.lastIndexOf("\n", Math.max(0, selectionStart - 1));
+    const after = props.text.indexOf("\n", selectionStart);
+    return props.text.slice(before + 1, after >= 0 ? after : props.text.length).trim();
   }
 
   return (
@@ -228,9 +245,30 @@ export function ScriptStudio(props: {
         <button
           type="button"
           className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={splitParagraphs}
+        >
+          Split Lines
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={mergeLines}
+        >
+          Merge Lines
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
           onClick={() => insertSnippet(' <break time="250ms"/> ')}
         >
           Insert Pause
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={() => props.onGenerateSelection(selectedTextOrLine())}
+        >
+          Generate Selection
         </button>
       </div>
 
@@ -240,24 +278,24 @@ export function ScriptStudio(props: {
           <button
             type="button"
             className="rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
-            onClick={saveVersion}
+            onClick={props.onSaveVersion}
           >
             Save Version
           </button>
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
-          {versions.map((version) => (
+          {props.versions.map((version) => (
             <button
               type="button"
               key={version.id}
               className="rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
-              onClick={() => props.onTextChange(version.text)}
+              onClick={() => props.onRestoreVersion(version)}
             >
               {version.label} / {version.createdAt.slice(11, 16)}
             </button>
           ))}
-          {versions.length === 0 && (
-            <span className="text-xs text-slate-500">No saved versions in this session.</span>
+          {props.versions.length === 0 && (
+            <span className="text-xs text-slate-500">No restore points saved for this project.</span>
           )}
         </div>
       </div>

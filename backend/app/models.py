@@ -6,6 +6,8 @@ LocalModelCategory = Literal["tts", "asr", "translation"]
 LocalModelStatus = Literal["ready", "not_configured", "not_installed", "disabled", "error"]
 ModelPackAction = Literal["install", "update", "remove"]
 BackgroundJobStatus = Literal["queued", "running", "succeeded", "failed", "canceled"]
+CloneTier = Literal["quick", "professional"]
+AllowedVoiceUse = Literal["personal", "commercial", "parody", "internal", "restricted"]
 
 
 class LocalModelInfo(BaseModel):
@@ -61,6 +63,9 @@ class ModelPackInfo(BaseModel):
     quality_score: int = Field(default=0, ge=0, le=100)
     latency_tier: Literal["realtime", "interactive", "batch", "manual"] = "manual"
     routing_hints: list[str] = Field(default_factory=list)
+    compatibility: dict[str, str | int | bool | list[str]] = Field(default_factory=dict)
+    community_pack: bool = False
+    provenance_required: bool = False
     detail: Optional[str] = None
     actions: list[ModelPackAction] = Field(default_factory=list)
 
@@ -69,6 +74,33 @@ class ModelPacksResponse(BaseModel):
     packs: list[ModelPackInfo]
     jobs: list[BackgroundJob] = Field(default_factory=list)
     total: int
+
+
+class ModelPackBenchmark(BaseModel):
+    id: str
+    name: str
+    category: LocalModelCategory
+    status: LocalModelStatus
+    quality_score: int = Field(default=0, ge=0, le=100)
+    naturalness_score: int = Field(default=0, ge=0, le=100)
+    language_quality: int = Field(default=0, ge=0, le=100)
+    latency_ms_estimate: int = Field(..., ge=0)
+    memory_mb_estimate: int = Field(..., ge=0)
+    best_for: list[str] = Field(default_factory=list)
+    measured: bool = False
+    detail: Optional[str] = None
+
+
+class ModelPackBenchmarksResponse(BaseModel):
+    benchmarks: list[ModelPackBenchmark]
+    total: int
+
+
+class ModelRouteRecommendation(BaseModel):
+    language: str
+    capability: str
+    pack: Optional[ModelPackInfo] = None
+    reason: str
 
 
 class AudioControls(BaseModel):
@@ -91,6 +123,13 @@ class PronunciationRule(BaseModel):
     priority: int = 0
 
 
+class TranslationGlossaryTerm(BaseModel):
+    term: str = Field(..., min_length=1, max_length=200)
+    replacement: str = Field(..., min_length=1, max_length=200)
+    language: Optional[str] = Field(default=None, max_length=16)
+    case_sensitive: bool = False
+
+
 class SynthesizeRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=10000)
     voice: str = Field(default="af_bella")
@@ -108,6 +147,7 @@ class TranslationRequest(BaseModel):
     source_language: str = Field(..., min_length=2, max_length=16)
     target_language: str = Field(..., min_length=2, max_length=16)
     provider: Literal["auto", "argos", "indictrans2", "nllb"] = "auto"
+    glossary: list[TranslationGlossaryTerm] = Field(default_factory=list)
 
 
 class TranslationResponse(BaseModel):
@@ -121,6 +161,7 @@ class TranscriptionSegment(BaseModel):
     start_ms: int = Field(..., ge=0)
     end_ms: int = Field(..., ge=0)
     text: str
+    speaker: Optional[str] = None
 
 
 class TranscriptionResponse(BaseModel):
@@ -176,6 +217,25 @@ class ClonedVoiceInfo(BaseModel):
     language: Optional[str] = None
     locale: Optional[str] = None
     capabilities: list[str] = Field(default_factory=lambda: ["voice-clone", "wav"])
+    sample_sha256: Optional[str] = None
+    allowed_uses: list[AllowedVoiceUse] = Field(default_factory=list)
+    clone_tier: CloneTier = "quick"
+    quality_score: Optional[int] = Field(default=None, ge=0, le=100)
+
+
+class AgentTurnRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    mode: Literal["assistant", "workflow", "voiceover"] = "assistant"
+    project_language: Optional[str] = Field(default=None, max_length=16)
+    tool_context: list[str] = Field(default_factory=list)
+
+
+class AgentTurnResponse(BaseModel):
+    text: str
+    intent: str
+    tool_plan: list[str] = Field(default_factory=list)
+    interruptible: bool = True
+    local_only: bool = True
 
 
 class ClonesListResponse(BaseModel):

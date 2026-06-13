@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { AgentPanel } from "./components/AgentPanel";
 import { AudioLibrary } from "./components/AudioLibrary";
 import { ClonePanel } from "./components/ClonePanel";
 import { ControlPanel } from "./components/ControlPanel";
@@ -44,6 +45,7 @@ import {
   exportSegmentsAsSrt,
   exportSegmentsAsVtt,
   formatTime,
+  inferSpeakerFromText,
   parseTranscript,
 } from "./lib/dubbing";
 import {
@@ -77,6 +79,7 @@ import {
   type OutputFormat,
   type PronunciationProfile,
   type PronunciationRule,
+  type ScriptVersion,
   type VoicePreset,
 } from "./lib/workspace";
 
@@ -146,6 +149,11 @@ export default function Home() {
   const [cloneConsent, setCloneConsent] = useState(false);
   const [cloneBusy, setCloneBusy] = useState(false);
   const [cloneMessage, setCloneMessage] = useState("");
+  const [cloneTier, setCloneTier] = useState<"quick" | "professional">("quick");
+  const [cloneAllowedUses, setCloneAllowedUses] = useState<
+    Array<"personal" | "commercial" | "parody" | "internal" | "restricted">
+  >(["personal"]);
+  const [cloneQualityScore, setCloneQualityScore] = useState<number | null>(null);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
@@ -289,6 +297,35 @@ export default function Home() {
     });
   }
 
+  function saveScriptVersion() {
+    if (!activeProject || !activeDocument) return;
+    const version: ScriptVersion = {
+      id: createId("scriptver"),
+      documentId: activeDocument.id,
+      label: `Version ${(activeProject.scriptVersions || []).length + 1}`,
+      text: activeDocument.text,
+      createdAt: new Date().toISOString(),
+    };
+    persistProject({
+      ...activeProject,
+      scriptVersions: [version, ...(activeProject.scriptVersions || [])].slice(0, 30),
+    });
+    setSuccess("Saved script restore point.");
+  }
+
+  function restoreScriptVersion(version: ScriptVersion) {
+    if (!activeProject || !activeDocument) return;
+    persistProject({
+      ...activeProject,
+      documents: activeProject.documents.map((document) =>
+        document.id === activeDocument.id
+          ? { ...document, text: version.text, updatedAt: new Date().toISOString() }
+          : document
+      ),
+    });
+    setSuccess(`Restored ${version.label}.`);
+  }
+
   function updateMode(mode: Mode) {
     if (!activeProject || !activeDocument) return;
     persistProject({
@@ -375,6 +412,11 @@ export default function Home() {
         status: "draft",
         alignment: undefined,
       })),
+      scriptVersions: (activeProject.scriptVersions || []).map((version) => ({
+        ...version,
+        id: createId("scriptver"),
+        documentId: cloneMap.get(version.documentId) || version.documentId,
+      })),
     };
     duplicated.activeDocumentId =
       cloneMap.get(activeProject.activeDocumentId) || duplicated.documents[0]?.id || "";
@@ -438,6 +480,63 @@ export default function Home() {
     } else {
       playNext();
     }
+  }
+
+  async function generateSelectedScriptAudio(text: string) {
+    if (!activeProject) return;
+    const cleanText = text.trim();
+    if (!cleanText) {
+      setError("Select a line or place the cursor inside a line before generating.");
+      return;
+    }
+    setIsGenerating(true);
+    setError("");
+    setSuccess("");
+    try {
+      const { blob, format } = await synthesizeText(cleanText);
+      const asset: AudioAsset = {
+        id: createId("asset"),
+        projectId: activeProject.id,
+        name: `Selected line - ${cleanText.slice(0, 36)}`,
+        text: cleanText,
+        voiceLabel: selectedVoiceLabel(selectedVoiceKey),
+        format,
+        createdAt: new Date().toISOString(),
+        bytes: blob.size,
+        blob,
+        language: activeProject.targetLanguage,
+        controls,
+      };
+      await saveAudioAsset(asset);
+      setAssets((current) => [asset, ...current]);
+      setActiveView("library");
+      setSuccess("Generated selected script line into the audio library.");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not generate selected line");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function synthesizeAgentResponse(text: string): Promise<Blob> {
+    if (!activeProject) throw new Error("Workspace is still loading");
+    const { blob, format } = await synthesizeText(text);
+    const asset: AudioAsset = {
+      id: createId("asset"),
+      projectId: activeProject.id,
+      name: `Agent response - ${text.slice(0, 36)}`,
+      text,
+      voiceLabel: selectedVoiceLabel(selectedVoiceKey),
+      format,
+      createdAt: new Date().toISOString(),
+      bytes: blob.size,
+      blob,
+      language: activeProject.targetLanguage,
+      controls,
+    };
+    await saveAudioAsset(asset);
+    setAssets((current) => [asset, ...current]);
+    return blob;
   }
 
   async function generateAudio() {
@@ -814,7 +913,7 @@ export default function Home() {
             endMs,
             sourceText: segment.text.trim(),
             targetText: segment.text.trim(),
-            speaker: "Speaker 1",
+            speaker: segment.speaker || "Speaker 1",
             sourceLanguage: data.language || activeProject.sourceLanguage,
             targetLanguage: activeProject.targetLanguage,
             voiceId: selectedVoiceKey,
@@ -852,6 +951,12 @@ export default function Home() {
         text,
         source_language: sourceLanguage,
         target_language: targetLanguage,
+        glossary: (activeProfile?.glossary || []).map((item) => ({
+          term: item.term,
+          replacement: item.pronunciation,
+          language: item.language || targetLanguage,
+          case_sensitive: false,
+        })),
       }),
     });
     if (!res.ok) throw new Error(await readApiError(res));
@@ -1054,6 +1159,31 @@ export default function Home() {
           : segment
       ),
     });
+  }
+
+  function inferDubbingSpeakers() {
+    if (!activeProject) return;
+    persistProject({
+      ...activeProject,
+      dubbingSegments: activeProject.dubbingSegments.map((segment) => {
+        const source = inferSpeakerFromText(segment.sourceText);
+        const target = inferSpeakerFromText(segment.targetText);
+        const speaker =
+          source.speaker !== "Speaker 1"
+            ? source.speaker
+            : target.speaker !== "Speaker 1"
+              ? target.speaker
+              : segment.speaker || "Speaker 1";
+        return {
+          ...segment,
+          speaker,
+          sourceText: source.text || segment.sourceText,
+          targetText: target.text || segment.targetText,
+          notes: `${segment.notes ? `${segment.notes}; ` : ""}speaker inferred`,
+        };
+      }),
+    });
+    setSuccess("Inferred speaker labels from transcript text.");
   }
 
   async function renderSegment(segment: DubbingSegment) {
@@ -1295,6 +1425,39 @@ export default function Home() {
     downloadBlob(new Blob([script], { type: "text/x-shellscript" }), `${projectSlug}-mux.sh`);
   }
 
+  async function exportDubbingMuxMp4(event: ChangeEvent<HTMLInputElement>) {
+    const original = event.target.files?.[0];
+    event.target.value = "";
+    if (!activeProject || !original) return;
+    const rendered = activeProject.dubbingSegments
+      .filter((segment) => segment.audioAssetId)
+      .sort((a, b) => a.startMs - b.startMs)
+      .map((segment) => assets.find((asset) => asset.id === segment.audioAssetId))
+      .filter((asset): asset is AudioAsset => Boolean(asset));
+    if (rendered.length === 0) {
+      setError("Render at least one dubbing segment before exporting MP4.");
+      return;
+    }
+    if (rendered.some((asset) => asset.format !== "wav")) {
+      setError("MP4 export needs a WAV timeline. Re-render non-WAV segments as WAV.");
+      return;
+    }
+    try {
+      setError("");
+      const wav = await stitchWavBlobs(rendered.map((asset) => asset.blob));
+      const form = new FormData();
+      form.append("original", original);
+      form.append("dubbed_audio", wav, `${activeProject.name || "kural"}-dubbing.wav`);
+      form.append("output_name", `${activeProject.name || "kural"}-dubbed.mp4`);
+      const res = await apiFetch(`${apiUrl}/api/mux`, { method: "POST", body: form });
+      if (!res.ok) throw new Error(await readApiError(res));
+      downloadBlob(await res.blob(), `${activeProject.name || "kural"}-dubbed.mp4`);
+      setSuccess("Exported muxed MP4 with local ffmpeg.");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not export MP4");
+    }
+  }
+
   async function exportActiveProject() {
     if (!activeProject) return;
     try {
@@ -1353,7 +1516,10 @@ export default function Home() {
         durationSeconds: clone.duration_s,
         consentConfirmed: Boolean(clone.consent_confirmed),
         watermark: clone.watermark,
-        allowedUses: "project-notes",
+        allowedUses: clone.allowed_uses || ["personal"],
+        cloneTier: clone.clone_tier || "quick",
+        qualityScore: clone.quality_score,
+        sampleSha256: clone.sample_sha256,
       })),
       generatedAssets: assets.map((asset) => ({
         id: asset.id,
@@ -1403,12 +1569,20 @@ export default function Home() {
       form.append("name", cloneName);
       form.append("language", cloneLanguage);
       form.append("consent_confirmed", String(cloneConsent));
+      form.append("clone_tier", cloneTier);
+      cloneAllowedUses.forEach((use) => form.append("allowed_uses", use));
+      if (cloneQualityScore !== null) {
+        form.append("quality_score", String(cloneQualityScore));
+      }
       const res = await apiFetch(`${apiUrl}/api/voices/clone`, { method: "POST", body: form });
       if (!res.ok) throw new Error(await readApiError(res));
       await refreshClones();
       setCloneName("");
       setCloneFile(null);
       setCloneConsent(false);
+      setCloneTier("quick");
+      setCloneAllowedUses(["personal"]);
+      setCloneQualityScore(null);
       setCloneMessage("Cloned voice is ready.");
     } catch (exc) {
       setCloneMessage(exc instanceof Error ? exc.message : "Could not clone voice");
@@ -1662,6 +1836,12 @@ export default function Home() {
                     mode={mode}
                     ssmlEnabled={ssmlEnabled}
                     text={activeDocument?.text || ""}
+                    versions={(activeProject.scriptVersions || []).filter(
+                      (version) => version.documentId === activeDocument.id
+                    )}
+                    onGenerateSelection={(value) => void generateSelectedScriptAudio(value)}
+                    onRestoreVersion={restoreScriptVersion}
+                    onSaveVersion={saveScriptVersion}
                     onSsmlEnabledChange={setSsmlEnabled}
                     onTextChange={updateDocumentText}
                   />
@@ -1788,13 +1968,18 @@ export default function Home() {
                     cloneLanguage={cloneLanguage}
                     cloneMessage={cloneMessage}
                     cloneName={cloneName}
+                    cloneTier={cloneTier}
+                    cloneAllowedUses={cloneAllowedUses}
                     clones={clones}
+                    onCloneAllowedUsesChange={setCloneAllowedUses}
                     onCloneConsentChange={setCloneConsent}
                     onCloneExport={() => void exportClones()}
                     onCloneFileChange={setCloneFile}
                     onCloneImport={importCloneArchive}
                     onCloneLanguageChange={setCloneLanguage}
                     onCloneNameChange={setCloneName}
+                    onCloneQualityScoreChange={setCloneQualityScore}
+                    onCloneTierChange={setCloneTier}
                     onCloneUpload={() => void uploadClone()}
                     onDeleteClone={(id) => void deleteClone(id)}
                   />
@@ -1903,6 +2088,7 @@ export default function Home() {
                   segments={activeProject.dubbingSegments}
                   voiceOptions={voiceOptions}
                   onExportTimeline={exportDubbingTimeline}
+                  onExportMuxMp4={exportDubbingMuxMp4}
                   onExportRenderPlan={exportDubbingRenderPlan}
                   onExportTranscript={exportDubbingTranscript}
                   onAlignSegment={(segment) => void alignSegment(segment)}
@@ -1911,6 +2097,7 @@ export default function Home() {
                   onApplySpeakerVoice={applySpeakerVoice}
                   onImportMedia={transcribeMediaFile}
                   onImportTranscript={importTranscriptFile}
+                  onInferSpeakers={inferDubbingSpeakers}
                   onMergeWithNext={mergeSegmentWithNext}
                   onExportMuxScript={exportDubbingMuxScript}
                   onRenderAll={() => void renderAllSegments()}
@@ -2089,6 +2276,17 @@ export default function Home() {
                     </label>
                   </div>
                 </section>
+              </div>
+            )}
+
+            {activeView === "agent" && activeProject && (
+              <div className="p-4">
+                <AgentPanel
+                  apiUrl={apiUrl}
+                  projectLanguage={activeProject.targetLanguage}
+                  selectedVoiceLabel={selectedVoiceLabel(selectedVoiceKey)}
+                  onSpeakResponse={synthesizeAgentResponse}
+                />
               </div>
             )}
 

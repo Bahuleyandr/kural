@@ -11,6 +11,7 @@ from .auth import require_api_key
 from .config import settings
 from .rate_limit import limiter, rate_limit_exceeded_handler
 from .routers import (
+    agent,
     clones,
     health,
     local_models,
@@ -82,6 +83,7 @@ app.include_router(clones.router, prefix="/api", dependencies=_protected)
 app.include_router(synthesize.router, prefix="/api", dependencies=_protected)
 app.include_router(local_models.router, prefix="/api", dependencies=_protected)
 app.include_router(model_packs.router, prefix="/api", dependencies=_protected)
+app.include_router(agent.router, prefix="/api", dependencies=_protected)
 # WebSocket streaming router self-authenticates (see local_models.py) —
 # the require_api_key dependency is HTTP-only and can't gate a WS route.
 app.include_router(local_models.stream_router, prefix="/api")

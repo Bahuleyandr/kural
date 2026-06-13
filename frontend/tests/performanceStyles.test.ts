@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  PERFORMANCE_STYLES,
   applyPerformanceStyle,
   expandSpeechTokens,
   prepareTextForPerformance,
@@ -17,6 +18,16 @@ describe("performance styles", () => {
     expect(angry.volumeDb).toBeGreaterThan(DEFAULT_CONTROLS.volumeDb);
     expect(romantic.speed).toBeLessThan(DEFAULT_CONTROLS.speed);
     expect(romantic.pauseScale).toBeGreaterThan(DEFAULT_CONTROLS.pauseScale);
+  });
+
+  test("includes creator pro style recipes", () => {
+    const ids = new Set(PERFORMANCE_STYLES.map((style) => style.id));
+
+    expect(ids).toContain("documentary");
+    expect(ids).toContain("advertisement");
+    expect(ids).toContain("tutorial");
+    expect(ids).toContain("audiobook");
+    expect(applyPerformanceStyle({ ...DEFAULT_CONTROLS, format: "mp3" }, "advertisement").format).toBe("mp3");
   });
 
   test("expands common tokens that sound mechanical when read literally", () => {

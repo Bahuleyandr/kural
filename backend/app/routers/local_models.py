@@ -1,8 +1,13 @@
 import asyncio
 import json
+import shutil
+import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 
 from ..auth import check_api_key
 from ..config import settings
@@ -35,6 +40,19 @@ _ACCEPTED_TRANSCRIBE_MIME = {
     "audio/mp4",
     "video/mp4",
     "video/quicktime",
+    "application/octet-stream",
+}
+_ACCEPTED_MUX_MEDIA_MIME = {
+    "video/mp4",
+    "video/quicktime",
+    "application/octet-stream",
+}
+_ACCEPTED_MUX_AUDIO_MIME = {
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp3",
     "application/octet-stream",
 }
 
@@ -123,10 +141,118 @@ async def transcribe(
         language=result.language,
         provider=result.provider,
         segments=[
-            {"start_ms": segment.start_ms, "end_ms": segment.end_ms, "text": segment.text}
+            {
+                "start_ms": segment.start_ms,
+                "end_ms": segment.end_ms,
+                "text": segment.text,
+                "speaker": segment.speaker,
+            }
             for segment in result.segments
         ],
     )
+
+
+@router.post("/mux")
+async def mux_dubbed_video(
+    original: UploadFile = File(..., description="Original MP4/MOV video"),
+    dubbed_audio: UploadFile = File(..., description="Kural-rendered WAV timeline"),
+    output_name: str = Form("kural-dubbed.mp4", max_length=120),
+) -> Response:
+    """Mux a rendered Kural WAV timeline into an original video with ffmpeg.
+
+    The command is fixed and argument-vector based. The UI supplies media
+    bytes only; it cannot inject arbitrary shell commands.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise HTTPException(
+            status_code=503,
+            detail=_error("ffmpeg_unavailable", "Install ffmpeg on this computer to export muxed MP4."),
+        )
+
+    original_type = original.content_type or "application/octet-stream"
+    audio_type = dubbed_audio.content_type or "application/octet-stream"
+    if original_type not in _ACCEPTED_MUX_MEDIA_MIME:
+        raise HTTPException(
+            status_code=415,
+            detail=_error("unsupported_media_type", f"Unsupported original media type: {original_type}."),
+        )
+    if audio_type not in _ACCEPTED_MUX_AUDIO_MIME:
+        raise HTTPException(
+            status_code=415,
+            detail=_error("unsupported_audio_type", f"Unsupported dubbed audio type: {audio_type}."),
+        )
+
+    max_bytes = settings.transcribe_max_upload_mb * 1024 * 1024
+    original_bytes = await original.read(max_bytes + 1)
+    audio_bytes = await dubbed_audio.read(max_bytes + 1)
+    if not original_bytes or not audio_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail=_error("empty_upload", "Original media and dubbed audio are both required."),
+        )
+    if len(original_bytes) > max_bytes or len(audio_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=_error(
+                "upload_too_large",
+                f"Mux inputs must each be {settings.transcribe_max_upload_mb} MB or smaller.",
+            ),
+        )
+
+    safe_name = Path(output_name).name
+    if not safe_name.lower().endswith(".mp4"):
+        safe_name = f"{safe_name}.mp4"
+
+    with tempfile.TemporaryDirectory(prefix="kural-mux-") as temp_dir:
+        root = Path(temp_dir)
+        original_path = root / "original.mp4"
+        audio_path = root / "dubbed.wav"
+        output_path = root / "dubbed.mp4"
+        original_path.write_bytes(original_bytes)
+        audio_path.write_bytes(audio_bytes)
+        command = [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(original_path),
+            "-i",
+            str(audio_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            str(output_path),
+        ]
+        try:
+            subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=600)
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.decode("utf-8", errors="replace").strip() or "ffmpeg failed."
+            raise HTTPException(
+                status_code=422,
+                detail=_error("mux_failed", detail[-800:]),
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(
+                status_code=504,
+                detail=_error("mux_timeout", "ffmpeg did not finish within 10 minutes."),
+            ) from exc
+
+        return Response(
+            content=output_path.read_bytes(),
+            media_type="video/mp4",
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        )
 
 
 @stream_router.websocket("/transcribe/stream")

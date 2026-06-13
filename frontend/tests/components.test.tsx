@@ -202,6 +202,72 @@ describe("ModelPackManager", () => {
           )
         );
       }
+      if (url.includes("/api/model-packs/benchmarks")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              benchmarks: [
+                {
+                  id: "kokoro-v1-onnx",
+                  name: "Kokoro v1.0 ONNX",
+                  category: "tts",
+                  status: "not_configured",
+                  quality_score: 82,
+                  naturalness_score: 86,
+                  language_quality: 82,
+                  latency_ms_estimate: 650,
+                  memory_mb_estimate: 2048,
+                  best_for: ["default-tts"],
+                  measured: false,
+                  detail: null,
+                },
+              ],
+              total: 1,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+        );
+      }
+      if (url.includes("/api/model-packs/recommend")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              language: "en-US",
+              capability: "tts",
+              pack: {
+                id: "kokoro-v1-onnx",
+                name: "Kokoro v1.0 ONNX",
+                category: "tts",
+                provider: "kokoro",
+                status: "not_configured",
+                version: "1.0",
+                source_url: null,
+                checksum: null,
+                license: "Apache-2.0",
+                disk_size_mb: 92,
+                installed_path: "/models/kokoro",
+                languages: ["en-US"],
+                capabilities: ["tts"],
+                requires_confirmation: false,
+                non_commercial: false,
+                trust_level: "built_in",
+                manifest_digest: "sha256:kma",
+                recommended: true,
+                quality_score: 82,
+                latency_tier: "interactive",
+                routing_hints: ["default-tts"],
+                compatibility: { ram_mb: 2048, gpu: false },
+                community_pack: false,
+                provenance_required: false,
+                detail: null,
+                actions: ["install"],
+              },
+              reason: "Kokoro has the best local score for tts.",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+        );
+      }
       if (url.endsWith("/api/model-packs/kokoro-v1-onnx/install")) {
         return Promise.resolve(
           new Response(
@@ -297,6 +363,7 @@ describe("WorkspaceTabs", () => {
     render(<WorkspaceTabs activeView="write" onViewChange={onViewChange} />);
     expect(screen.getByRole("button", { name: "quality" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "models" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "agent" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "settings" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "quality" }));
     expect(onViewChange).toHaveBeenCalledWith("quality");
@@ -439,13 +506,18 @@ describe("ClonePanel", () => {
         cloneLanguage="en-US"
         cloneMessage=""
         cloneName="x"
+        cloneTier="quick"
+        cloneAllowedUses={["personal"]}
         clones={[]}
+        onCloneAllowedUsesChange={() => undefined}
         onCloneConsentChange={() => undefined}
         onCloneExport={() => undefined}
         onCloneFileChange={() => undefined}
         onCloneImport={() => undefined}
         onCloneLanguageChange={() => undefined}
         onCloneNameChange={() => undefined}
+        onCloneQualityScoreChange={() => undefined}
+        onCloneTierChange={() => undefined}
         onCloneUpload={() => undefined}
         onDeleteClone={() => undefined}
       />
@@ -464,13 +536,18 @@ describe("ClonePanel", () => {
         cloneLanguage="en-US"
         cloneMessage=""
         cloneName=""
+        cloneTier="quick"
+        cloneAllowedUses={["personal"]}
         clones={[]}
+        onCloneAllowedUsesChange={() => undefined}
         onCloneConsentChange={() => undefined}
         onCloneExport={() => undefined}
         onCloneFileChange={() => undefined}
         onCloneImport={() => undefined}
         onCloneLanguageChange={() => undefined}
         onCloneNameChange={() => undefined}
+        onCloneQualityScoreChange={() => undefined}
+        onCloneTierChange={() => undefined}
         onCloneUpload={() => undefined}
         onDeleteClone={() => undefined}
       />

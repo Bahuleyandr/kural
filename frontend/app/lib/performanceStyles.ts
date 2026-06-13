@@ -10,7 +10,11 @@ export type PerformanceStyleId =
   | "excited"
   | "angry"
   | "romantic"
-  | "dramatic";
+  | "dramatic"
+  | "documentary"
+  | "advertisement"
+  | "tutorial"
+  | "audiobook";
 
 type ControlTuning = Partial<Omit<AudioControls, "format">>;
 
@@ -168,6 +172,62 @@ export const PERFORMANCE_STYLES: PerformanceStyle[] = [
       pauseScale: 1.5,
     },
     text: { expandTokens: true, sentenceBreakMs: 520, commaBreakMs: 180 },
+  },
+  {
+    id: "documentary",
+    label: "Documentary",
+    description: "Measured, credible pacing with room for visual edits.",
+    controls: {
+      speed: 0.92,
+      pitchSemitones: -1,
+      volumeDb: 0,
+      normalize: true,
+      trimSilence: false,
+      pauseScale: 1.32,
+    },
+    text: { expandTokens: true, sentenceBreakMs: 360, commaBreakMs: 125 },
+  },
+  {
+    id: "advertisement",
+    label: "Advertisement",
+    description: "Confident, brighter, and tighter for short promos.",
+    controls: {
+      speed: 1.04,
+      pitchSemitones: 0.75,
+      volumeDb: 1.5,
+      normalize: true,
+      trimSilence: true,
+      pauseScale: 0.92,
+    },
+    text: { expandTokens: true, sentenceBreakMs: 180, commaBreakMs: 55 },
+  },
+  {
+    id: "tutorial",
+    label: "Tutorial",
+    description: "Clear instructional delivery with extra step pauses.",
+    controls: {
+      speed: 0.93,
+      pitchSemitones: -0.25,
+      volumeDb: 0,
+      normalize: true,
+      trimSilence: false,
+      pauseScale: 1.24,
+    },
+    text: { expandTokens: true, sentenceBreakMs: 320, commaBreakMs: 115 },
+  },
+  {
+    id: "audiobook",
+    label: "Audiobook",
+    description: "Long-form narration with warmer pitch and generous pauses.",
+    controls: {
+      speed: 0.88,
+      pitchSemitones: -1.25,
+      volumeDb: -0.5,
+      normalize: true,
+      trimSilence: false,
+      pauseScale: 1.45,
+    },
+    text: { expandTokens: true, sentenceBreakMs: 460, commaBreakMs: 160 },
   },
 ];
 

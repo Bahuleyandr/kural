@@ -162,6 +162,8 @@ export function QualityStudio(props: {
   const [analysis, setAnalysis] = useState<Record<string, AudioAnalysis>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
+  const [blindMode, setBlindMode] = useState(false);
+  const [winnerId, setWinnerId] = useState("");
 
   useEffect(() => {
     if (!voiceKey && props.selectedVoiceKey) setVoiceKey(props.selectedVoiceKey);
@@ -210,6 +212,10 @@ export function QualityStudio(props: {
     () => naturalnessCoach(text, props.controls),
     [text, props.controls]
   );
+  const blindLabels = useMemo(() => {
+    const labels = ["A", "B", "C", "D", "E", "F"];
+    return Object.fromEntries(results.map((result, index) => [result.id, labels[index] || `${index + 1}`]));
+  }, [results]);
 
   async function renderStyle(style: PerformanceStyle) {
     if (!text.trim()) {
@@ -250,6 +256,17 @@ export function QualityStudio(props: {
           <span className="rounded border border-slate-200 px-3 py-1 text-sm">
             {results.length} sample{results.length === 1 ? "" : "s"}
           </span>
+          <label className="flex items-center gap-2 rounded border border-slate-200 px-3 py-1 text-sm">
+            <input
+              type="checkbox"
+              checked={blindMode}
+              onChange={(event) => {
+                setBlindMode(event.target.checked);
+                setWinnerId("");
+              }}
+            />
+            Blind compare
+          </label>
         </div>
         <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
           <label className="text-sm font-medium">
@@ -359,11 +376,14 @@ export function QualityStudio(props: {
                   </div>
                 );
               })()}
-              <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h4 className="font-medium">{result.label}</h4>
+                  <h4 className="font-medium">
+                    {blindMode ? `Take ${blindLabels[result.id]}` : result.label}
+                    {winnerId === result.id ? " / winner" : ""}
+                  </h4>
                   <p className="text-xs text-slate-500">
-                    {result.voiceLabel} / {result.format.toUpperCase()} /{" "}
+                    {blindMode ? "Hidden style" : result.voiceLabel} / {result.format.toUpperCase()} /{" "}
                     {(result.bytes / 1024).toFixed(1)} KB
                   </p>
                 </div>
@@ -373,6 +393,21 @@ export function QualityStudio(props: {
                   onClick={() => props.onUseSample(result)}
                 >
                   Use Settings
+                </button>
+                <button
+                  type="button"
+                  className={`rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
+                    winnerId === result.id
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                      : "border-slate-300"
+                  }`}
+                  aria-pressed={winnerId === result.id}
+                  onClick={() => {
+                    setWinnerId(result.id);
+                    props.onUseSample(result);
+                  }}
+                >
+                  Pick Winner
                 </button>
                 <button
                   type="button"

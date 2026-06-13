@@ -7,6 +7,7 @@ const WORKSPACE_VIEWS: WorkspaceView[] = [
   "models",
   "dubbing",
   "pronunciation",
+  "agent",
   "library",
   "settings",
 ];

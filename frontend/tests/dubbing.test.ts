@@ -30,13 +30,26 @@ describe("parseTranscript", () => {
   test("imports CSV rows with headers", () => {
     const segments = parseTranscript(
       "scene.csv",
-      "start_ms,end_ms,text\n0,1500,\"First line\"\n2000,3500,Second line",
+      "start_ms,end_ms,speaker,text\n0,1500,Narrator,\"First line\"\n2000,3500,Guest,Second line",
       "en-US",
       "en-US"
     );
 
     expect(segments.map((segment) => segment.sourceText)).toEqual(["First line", "Second line"]);
     expect(segments[1].startMs).toBe(2000);
+    expect(segments[1].speaker).toBe("Guest");
+  });
+
+  test("infers speaker labels from transcript text", () => {
+    const segments = parseTranscript(
+      "scene.srt",
+      "1\n00:00:01,000 --> 00:00:03,500\n[Narrator] Hello world",
+      "en-US",
+      "en-US"
+    );
+
+    expect(segments[0].speaker).toBe("Narrator");
+    expect(segments[0].sourceText).toBe("Hello world");
   });
 
   test("falls back to paragraph based plain text segments", () => {

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import io
 import json
 import shutil
@@ -15,6 +16,8 @@ from ...config import settings
 
 _CLONE_NAME_MAX = 100
 _CONSENT_WATERMARK = "kural-voice-clone-consent-v1"
+_ALLOWED_USES = {"personal", "commercial", "parody", "internal", "restricted"}
+_CLONE_TIERS = {"quick", "professional"}
 
 
 def _clone_dir() -> Path:
@@ -156,11 +159,21 @@ def save_voice_sample(
     name: str,
     consent_confirmed: bool = False,
     language: str | None = None,
+    allowed_uses: list[str] | None = None,
+    clone_tier: str = "quick",
+    quality_score: int | None = None,
 ) -> dict:
     """Persist a WAV sample and return a new cloned voice record."""
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("Voice name cannot be blank.")
+    clean_uses = [use for use in (allowed_uses or ["personal"]) if use in _ALLOWED_USES]
+    if not clean_uses:
+        clean_uses = ["personal"]
+    clean_tier = clone_tier if clone_tier in _CLONE_TIERS else "quick"
+    clean_quality = None
+    if quality_score is not None:
+        clean_quality = max(0, min(100, int(quality_score)))
 
     duration, sr = _read_sample_info(audio_bytes)
     voice_id = str(uuid.uuid4())
@@ -176,5 +189,9 @@ def save_voice_sample(
         "language": language,
         "locale": language,
         "capabilities": ["voice-clone", "wav", "advanced-controls"],
+        "sample_sha256": hashlib.sha256(audio_bytes).hexdigest(),
+        "allowed_uses": clean_uses,
+        "clone_tier": clean_tier,
+        "quality_score": clean_quality,
     }
     return _write_clone_record(meta, audio_bytes)
