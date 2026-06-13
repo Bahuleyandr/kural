@@ -79,5 +79,11 @@ class Settings(BaseSettings):
     enable_nllb: bool = False
     nllb_model_dir: str = "~/.cache/kural/translation/nllb"
 
+    # Optional local agent and media tools. These are never launched from the
+    # browser UI; Kural only probes or calls known local endpoints/binaries.
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "llama3.1:8b"
+    lip_sync_binary: str = ""
+
 
 settings = Settings()

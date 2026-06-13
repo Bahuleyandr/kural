@@ -1,6 +1,14 @@
 """Local voice-agent foundation routes."""
+from __future__ import annotations
+
+import asyncio
+import json
+import urllib.error
+import urllib.request
+
 from fastapi import APIRouter
 
+from ..config import settings
 from ..models import AgentTurnRequest, AgentTurnResponse
 
 router = APIRouter(tags=["agent"])
@@ -42,12 +50,51 @@ def _classify(message: str) -> tuple[str, list[str], str]:
     )
 
 
+def _ollama_generate(req: AgentTurnRequest, fallback: str) -> tuple[str, str] | None:
+    base = settings.ollama_url.rstrip("/")
+    if not base.startswith(("http://127.0.0.1", "http://localhost")):
+        return None
+    model = req.llm_model or settings.ollama_model
+    prompt = (
+        "You are Kural's local offline voice-workstation agent. "
+        "Be concise, practical, and do not suggest cloud services. "
+        f"Project language: {req.project_language or 'unknown'}.\n"
+        f"Available tools: {', '.join(req.tool_context[:8]) or 'tts,dubbing,models,clone-studio'}.\n"
+        f"User: {req.message.strip()}\n"
+        f"Fallback answer if unsure: {fallback}"
+    )
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.2},
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return None
+    text = str(data.get("response") or "").strip()
+    if not text:
+        return None
+    return text, model
+
+
 @router.post("/agent/respond", response_model=AgentTurnResponse)
 async def respond(req: AgentTurnRequest) -> AgentTurnResponse:
-    """Return a local, deterministic assistant turn.
+    """Return a local assistant turn.
 
-    Public Beta keeps this local and dependency-light. A future local LLM
-    adapter can swap in behind the same response shape without changing the UI.
+    By default this stays deterministic and dependency-light. When the user
+    opts in, Kural can call a loopback Ollama endpoint; failures fall back to
+    the deterministic tool plan instead of breaking the workflow.
     """
     intent, tool_plan, response = _classify(req.message)
     language_note = f" Project language: {req.project_language}." if req.project_language else ""
@@ -56,10 +103,19 @@ async def respond(req: AgentTurnRequest) -> AgentTurnResponse:
         if req.tool_context
         else ""
     )
+    provider = "deterministic"
+    model = None
+    if req.use_llm and req.llm_provider == "ollama":
+        ollama = await asyncio.to_thread(_ollama_generate, req, response)
+        if ollama is not None:
+            response, model = ollama
+            provider = "ollama"
     return AgentTurnResponse(
         text=f"{response}{language_note}{context_note}",
         intent=intent,
         tool_plan=tool_plan,
         interruptible=True,
         local_only=True,
+        llm_provider=provider,
+        llm_model=model,
     )

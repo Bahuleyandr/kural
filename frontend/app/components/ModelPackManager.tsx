@@ -10,6 +10,8 @@ import type {
   ModelPackInfo,
   ModelPacksResponse,
   ModelRouteRecommendation,
+  MarketplaceValidationResponse,
+  VoiceQualityBenchmarkResponse,
 } from "../lib/types";
 
 const WORKFLOW_UNLOCKS = [
@@ -32,6 +34,29 @@ const WORKFLOW_UNLOCKS = [
 ];
 
 const TERMINAL = new Set<BackgroundJob["status"]>(["succeeded", "failed", "canceled"]);
+const DEFAULT_MARKETPLACE_MANIFEST = JSON.stringify(
+  {
+    id: "community-voice-demo",
+    name: "Community Voice Demo",
+    version: "1.0.0",
+    pack_type: "voice",
+    category: "tts",
+    provider: "community",
+    checksum: "sha256:replace-with-pack-digest",
+    license: "creator-specified",
+    languages: ["en-US"],
+    capabilities: ["voice-clone", "wav"],
+    allowed_uses: ["personal"],
+    consent_proof: "signed-consent-reference",
+    sample_sha256: "sha256:replace-with-sample-digest",
+    signature: "",
+    provenance_required: true,
+    watermark_required: true,
+    compatibility: { cpu: "x64/arm64", gpu: false, ram_mb: 4096 },
+  },
+  null,
+  2
+);
 
 function statusClass(status: ModelPackInfo["status"] | BackgroundJob["status"]) {
   if (status === "ready" || status === "succeeded") {
@@ -103,9 +128,15 @@ export function ModelPackManager(props: {
   const [error, setError] = useState<string | null>(null);
   const [recommendedOnly, setRecommendedOnly] = useState(false);
   const [benchmarks, setBenchmarks] = useState<ModelPackBenchmark[]>([]);
+  const [benchmarkRun, setBenchmarkRun] = useState<VoiceQualityBenchmarkResponse | null>(null);
+  const [benchmarkBusy, setBenchmarkBusy] = useState(false);
+  const [benchmarkUseCase, setBenchmarkUseCase] = useState("narration");
   const [recommendation, setRecommendation] = useState<ModelRouteRecommendation | null>(null);
   const [routeLanguage, setRouteLanguage] = useState("en-US");
   const [routeCapability, setRouteCapability] = useState("tts");
+  const [marketplaceManifest, setMarketplaceManifest] = useState(DEFAULT_MARKETPLACE_MANIFEST);
+  const [marketplaceValidation, setMarketplaceValidation] =
+    useState<MarketplaceValidationResponse | null>(null);
 
   const allPacks = packs.length > 0 ? packs : fallbackPacks(models);
   const effectivePacks = recommendedOnly ? allPacks.filter((pack) => pack.recommended) : allPacks;
@@ -229,6 +260,55 @@ export function ModelPackManager(props: {
     }
   }
 
+  async function runBenchmark() {
+    setBenchmarkBusy(true);
+    setError(null);
+    setMessage("");
+    try {
+      const res = await apiFetch(`${apiUrl}/api/model-packs/benchmarks/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: routeLanguage,
+          capability: routeCapability,
+          use_case: benchmarkUseCase,
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const payload = (await res.json()) as VoiceQualityBenchmarkResponse;
+      setBenchmarkRun(payload);
+      setMessage(`Benchmark ranked ${payload.results.length} local candidate${payload.results.length === 1 ? "" : "s"}.`);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not run benchmark.");
+    } finally {
+      setBenchmarkBusy(false);
+    }
+  }
+
+  async function validateMarketplaceManifest() {
+    setError(null);
+    setMessage("");
+    try {
+      const parsed = JSON.parse(marketplaceManifest);
+      const res = await apiFetch(`${apiUrl}/api/marketplace/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const payload = (await res.json()) as MarketplaceValidationResponse;
+      setMarketplaceValidation(payload);
+      setMessage(
+        payload.installable
+          ? "Pack manifest is installable after signature/checksum verification."
+          : "Pack manifest needs review before install."
+      );
+    } catch (exc) {
+      setMarketplaceValidation(null);
+      setError(exc instanceof Error ? exc.message : "Could not validate manifest JSON.");
+    }
+  }
+
   return (
     <section className="space-y-4" aria-labelledby="model-pack-manager-heading">
       <div className="rounded border border-slate-300 bg-white p-4">
@@ -316,7 +396,7 @@ export function ModelPackManager(props: {
             workstation {workstationScore}/100
           </span>
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto_auto]">
           <label className="text-sm">
             Language
             <input
@@ -338,12 +418,35 @@ export function ModelPackManager(props: {
               <option value="translate">Translation</option>
             </select>
           </label>
+          <label className="text-sm">
+            Use case
+            <select
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              value={benchmarkUseCase}
+              onChange={(event) => setBenchmarkUseCase(event.target.value)}
+            >
+              <option value="narration">Narration</option>
+              <option value="dubbing">Dubbing</option>
+              <option value="clone">Clone</option>
+              <option value="agent">Agent</option>
+              <option value="audiobook">Audiobook</option>
+            </select>
+          </label>
           <button
             type="button"
             className="self-end rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             onClick={() => void loadModelPacks()}
           >
             Route
+          </button>
+          <button
+            type="button"
+            className="self-end rounded bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+            disabled={benchmarkBusy}
+            onClick={() => void runBenchmark()}
+            aria-busy={benchmarkBusy}
+          >
+            {benchmarkBusy ? "Running..." : "Benchmark"}
           </button>
         </div>
         {recommendation && (
@@ -398,10 +501,74 @@ export function ModelPackManager(props: {
             ))}
           </div>
         )}
-        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-          <span className="font-medium">Community pack foundation:</span>{" "}
-          importable community packs must ship a verified manifest, checksum, license,
-          compatibility block, and consent/provenance notes before Kural will show install actions.
+        {benchmarkRun && (
+          <div className="mt-3 grid gap-2 xl:grid-cols-2">
+            {benchmarkRun.results.slice(0, 4).map((result) => (
+              <div key={result.id} className="rounded border border-slate-200 p-3 text-xs text-slate-600">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-slate-800">
+                    #{result.route_rank} {result.name}
+                  </span>
+                  <span>{result.score}/100</span>
+                </div>
+                <dl className="mt-2 grid grid-cols-4 gap-2">
+                  <div>
+                    <dt>Noise</dt>
+                    <dd>{result.noise_score}</dd>
+                  </div>
+                  <div>
+                    <dt>Natural</dt>
+                    <dd>{result.naturalness_score}</dd>
+                  </div>
+                  <div>
+                    <dt>Latency</dt>
+                    <dd>{result.latency_ms}ms</dd>
+                  </div>
+                  <div>
+                    <dt>RAM</dt>
+                    <dd>{result.memory_mb}MB</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-medium text-slate-800">Community Pack Validator</span>
+            <button
+              type="button"
+              className="rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+              onClick={() => void validateMarketplaceManifest()}
+            >
+              Validate
+            </button>
+          </div>
+          <textarea
+            className="mt-2 min-h-44 w-full rounded border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+            value={marketplaceManifest}
+            onChange={(event) => setMarketplaceManifest(event.target.value)}
+            aria-label="Marketplace manifest JSON"
+          />
+          {marketplaceValidation && (
+            <div className="mt-2 rounded border border-slate-200 bg-white p-3 text-xs text-slate-700">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">
+                  {marketplaceValidation.trust_level.replace("_", " ")} / {marketplaceValidation.score}/100
+                </span>
+                <span>{marketplaceValidation.manifest_digest.slice(0, 19)}</span>
+              </div>
+              {[...marketplaceValidation.errors, ...marketplaceValidation.warnings].length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {[...marketplaceValidation.errors, ...marketplaceValidation.warnings].map((issue) => (
+                    <li key={`${issue.severity}-${issue.code}`}>
+                      {issue.severity}: {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       </section>
 

@@ -4,11 +4,13 @@ import userEvent from "@testing-library/user-event";
 
 import { AudioLibrary } from "../app/components/AudioLibrary";
 import { ClonePanel } from "../app/components/ClonePanel";
+import { DubbingTimeline } from "../app/components/DubbingTimeline";
 import { FirstRunWizard } from "../app/components/FirstRunWizard";
 import { LocalModelPanel } from "../app/components/LocalModelPanel";
 import { ModelPackManager } from "../app/components/ModelPackManager";
 import { QualityStudio } from "../app/components/QualityStudio";
 import { SettingsView } from "../app/components/SettingsView";
+import { ScriptStudio } from "../app/components/ScriptStudio";
 import { TtsEnginePanel } from "../app/components/TtsEnginePanel";
 import { SetupBanner } from "../app/components/SetupBanner";
 import { WorkspaceTabs } from "../app/components/WorkspaceTabs";
@@ -418,6 +420,19 @@ describe("QualityStudio", () => {
 
 describe("SettingsView", () => {
   it("groups dictation, release diagnostics, and privacy panels", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: "needs_setup",
+            checks: [],
+            storage: { model_pack_root: "/models", model_files_sampled: 0 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
     const project = createProject("Settings test");
     render(
       <SettingsView
@@ -440,6 +455,137 @@ describe("SettingsView", () => {
       screen.getByRole("heading", { name: /desktop release diagnostics/i })
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /privacy and safety/i })).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("ScriptStudio", () => {
+  it("shows filler words and can export captions", async () => {
+    const user = userEvent.setup();
+    const onExportCaptions = vi.fn();
+    render(
+      <ScriptStudio
+        mode="single"
+        ssmlEnabled={false}
+        text="Um this is basically a line."
+        versions={[]}
+        onExportCaptions={onExportCaptions}
+        onGenerateSelection={() => undefined}
+        onRestoreVersion={() => undefined}
+        onSaveVersion={() => undefined}
+        onSsmlEnabledChange={() => undefined}
+        onTextChange={() => undefined}
+      />
+    );
+    expect(screen.getByText("um")).toBeInTheDocument();
+    expect(screen.getByText("basically")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /export captions/i }));
+    expect(onExportCaptions).toHaveBeenCalled();
+  });
+});
+
+describe("DubbingTimeline", () => {
+  it("renders source video preview and editable aligned words", async () => {
+    const user = userEvent.setup();
+    const onUpdateAlignedWord = vi.fn();
+    const segment = {
+      id: "dub-1",
+      startMs: 0,
+      endMs: 2000,
+      speaker: "Narrator",
+      sourceText: "Hello world",
+      targetText: "Hello world",
+      sourceLanguage: "en-US",
+      targetLanguage: "en-US",
+      voiceId: "kokoro:af_bella",
+      controls: DEFAULT_CONTROLS,
+      status: "ready" as const,
+      audioAssetId: "asset-1",
+      notes: "",
+      alignment: {
+        provider: "test",
+        durationMs: 1500,
+        overrunMs: 0,
+        checkedAt: new Date().toISOString(),
+        words: [{ text: "Hello", startMs: 0, endMs: 500, probability: 0.9 }],
+      },
+    };
+    const sourceAsset: AudioAsset = {
+      id: "media-1",
+      projectId: "p1",
+      name: "source.mp4",
+      text: "Source media",
+      voiceLabel: "Source media",
+      format: "mp4",
+      createdAt: new Date().toISOString(),
+      bytes: 1024,
+      blob: new Blob(["video"], { type: "video/mp4" }),
+      mediaKind: "source-media",
+    };
+    const renderedAsset: AudioAsset = {
+      id: "asset-1",
+      projectId: "p1",
+      name: "dub.wav",
+      text: "Hello world",
+      voiceLabel: "Bella",
+      format: "wav",
+      createdAt: new Date().toISOString(),
+      bytes: 1024,
+      blob: new Blob(["RIFF"], { type: "audio/wav" }),
+      mediaKind: "generated",
+    };
+    render(
+      <DubbingTimeline
+        assetDurations={{ "asset-1": 1500 }}
+        assets={[sourceAsset, renderedAsset]}
+        audioUrls={{ "media-1": "blob:media", "asset-1": "blob:audio" }}
+        sourceMediaAsset={sourceAsset}
+        isTranscribing={false}
+        isTranslating={false}
+        lipSyncMessage=""
+        localModelPanel={null}
+        selectedVoiceKey="kokoro:af_bella"
+        segments={[segment]}
+        voiceOptions={[
+          {
+            key: "kokoro:af_bella",
+            id: "af_bella",
+            kind: "kokoro",
+            label: "[Kokoro] Bella",
+            shortLabel: "Bella",
+            language: "en-US",
+          },
+        ]}
+        onAlignSegment={() => undefined}
+        onApplySpeakerSpeed={() => undefined}
+        onApplySpeakerVoice={() => undefined}
+        onApplySuggestedSpeed={() => undefined}
+        onCheckLipSync={() => undefined}
+        onExportMuxMp4={() => undefined}
+        onExportMuxScript={() => undefined}
+        onExportRenderPlan={() => undefined}
+        onExportTimeline={() => undefined}
+        onExportTranscript={() => undefined}
+        onImportMedia={() => undefined}
+        onImportTranscript={() => undefined}
+        onInferSpeakers={() => undefined}
+        onMergeWithNext={() => undefined}
+        onRenderAll={() => undefined}
+        onRenderSegment={() => undefined}
+        onRetimingAll={() => undefined}
+        onRetimingSegment={() => undefined}
+        onRetryFailed={() => undefined}
+        onSplitSegment={() => undefined}
+        onTranslateAll={() => undefined}
+        onTranslateSegment={() => undefined}
+        onUpdateAlignedWord={onUpdateAlignedWord}
+        onUpdateSegment={() => undefined}
+      />
+    );
+    expect(screen.getByText(/source.mp4/i)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText(/word 1 for segment 1/i));
+    await user.type(screen.getByLabelText(/word 1 for segment 1/i), "Hi");
+    expect(onUpdateAlignedWord).toHaveBeenCalled();
   });
 });
 

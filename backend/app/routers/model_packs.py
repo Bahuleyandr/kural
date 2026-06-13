@@ -8,13 +8,19 @@ from ..local_models.model_packs import (
     list_jobs,
     list_model_packs,
     recommend_model_pack,
+    run_voice_quality_benchmark,
     start_model_pack_job,
+    validate_marketplace_manifest,
 )
 from ..models import (
     BackgroundJob,
+    MarketplacePackManifest,
+    MarketplaceValidationResponse,
     ModelPackBenchmarksResponse,
     ModelPacksResponse,
     ModelRouteRecommendation,
+    VoiceQualityBenchmarkRequest,
+    VoiceQualityBenchmarkResponse,
 )
 
 router = APIRouter(tags=["model-packs"])
@@ -49,6 +55,13 @@ async def model_pack_benchmarks() -> ModelPackBenchmarksResponse:
     return ModelPackBenchmarksResponse(benchmarks=benchmarks, total=len(benchmarks))
 
 
+@router.post("/model-packs/benchmarks/run", response_model=VoiceQualityBenchmarkResponse)
+async def run_model_pack_benchmark(
+    req: VoiceQualityBenchmarkRequest,
+) -> VoiceQualityBenchmarkResponse:
+    return run_voice_quality_benchmark(req)
+
+
 @router.get("/model-packs/recommend", response_model=ModelRouteRecommendation)
 async def model_pack_recommendation(
     language: str = "",
@@ -56,6 +69,13 @@ async def model_pack_recommendation(
 ) -> ModelRouteRecommendation:
     pack, reason = recommend_model_pack(language=language, capability=capability)
     return ModelRouteRecommendation(language=language, capability=capability, pack=pack, reason=reason)
+
+
+@router.post("/marketplace/validate", response_model=MarketplaceValidationResponse)
+async def validate_marketplace_pack(
+    manifest: MarketplacePackManifest,
+) -> MarketplaceValidationResponse:
+    return validate_marketplace_manifest(manifest)
 
 
 @router.post("/model-packs/{pack_id}/install", response_model=BackgroundJob, status_code=202)

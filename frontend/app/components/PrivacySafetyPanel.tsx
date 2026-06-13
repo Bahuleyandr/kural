@@ -1,5 +1,5 @@
 import type { ClonedVoiceInfo, LocalModelInfo } from "../lib/types";
-import type { AudioAsset } from "../lib/workspace";
+import type { AudioAsset, KuralProject } from "../lib/workspace";
 
 function countReady(models: LocalModelInfo[], category: LocalModelInfo["category"]) {
   return models.filter((model) => model.category === category && model.status === "ready").length;
@@ -7,6 +7,7 @@ function countReady(models: LocalModelInfo[], category: LocalModelInfo["category
 
 export function PrivacySafetyPanel(props: {
   apiUrl: string;
+  activeProject: KuralProject | null;
   clones: ClonedVoiceInfo[];
   assets: AudioAsset[];
   models: LocalModelInfo[];
@@ -15,6 +16,7 @@ export function PrivacySafetyPanel(props: {
   const cloneConsentCount = props.clones.filter((clone) => clone.consent_confirmed).length;
   const generatedBytes = props.assets.reduce((total, asset) => total + asset.bytes, 0);
   const localOnly = props.apiUrl.includes("127.0.0.1") || props.apiUrl.includes("localhost");
+  const voiceUseLog = props.activeProject?.voiceUseLog || [];
 
   return (
     <section className="rounded border border-slate-300 bg-white p-4" aria-labelledby="privacy-safety-heading">
@@ -63,8 +65,13 @@ export function PrivacySafetyPanel(props: {
           <p className="mt-1 text-lg font-semibold">{countReady(props.models, "translation")}</p>
           <p className="text-xs text-slate-500">ready locally</p>
         </div>
+        <div className="rounded border border-slate-200 p-3">
+          <p className="text-xs uppercase text-slate-500">Voice uses</p>
+          <p className="mt-1 text-lg font-semibold">{voiceUseLog.length}</p>
+          <p className="text-xs text-slate-500">project audit entries</p>
+        </div>
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
         <div className="rounded border border-slate-200 p-3">
           <h3 className="font-medium">Consent ledger</h3>
           <div className="mt-2 space-y-2">
@@ -86,12 +93,30 @@ export function PrivacySafetyPanel(props: {
                   {clone.language || "custom"} / {clone.engine} / {clone.created_at.slice(0, 10)}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Allowed uses: set per-project notes until clone-level policies are exposed.
+                  Allowed uses: {(clone.allowed_uses || ["personal"]).join(", ")}
                 </p>
               </div>
             ))}
             {props.clones.length === 0 && (
               <p className="text-sm text-slate-500">No cloned voices in the local ledger yet.</p>
+            )}
+          </div>
+        </div>
+        <div className="rounded border border-slate-200 p-3">
+          <h3 className="font-medium">Voice-use audit</h3>
+          <div className="mt-2 space-y-2">
+            {voiceUseLog.slice(0, 8).map((entry) => (
+              <div key={entry.id} className="rounded border border-slate-200 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{entry.voiceLabel}</span>
+                  <span>{entry.purpose}</span>
+                </div>
+                <p className="mt-1 text-slate-500">{entry.createdAt.slice(0, 19)}</p>
+                <p className="mt-1 line-clamp-2 text-slate-700">{entry.textPreview}</p>
+              </div>
+            ))}
+            {voiceUseLog.length === 0 && (
+              <p className="text-sm text-slate-500">No project voice-use entries yet.</p>
             )}
           </div>
         </div>

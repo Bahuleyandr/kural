@@ -60,6 +60,79 @@ def test_model_pack_benchmarks_and_recommendation_are_available():
     assert "best local score" in payload["reason"]
 
 
+def test_model_pack_benchmark_run_ranks_candidates():
+    res = TestClient(app).post(
+        "/api/model-packs/benchmarks/run",
+        json={
+            "language": "en-US",
+            "capability": "tts",
+            "use_case": "dubbing",
+            "sample_scripts": ["This translated line should fit the original timing."],
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["language"] == "en-US"
+    assert payload["sample_scripts"]
+    assert payload["results"]
+    assert payload["results"][0]["route_rank"] == 1
+    assert payload["results"][0]["score"] >= 0
+    assert payload["recommendation"]["capability"] == "tts"
+
+
+def test_marketplace_manifest_validation_blocks_unsigned_voice_pack():
+    res = TestClient(app).post(
+        "/api/marketplace/validate",
+        json={
+            "id": "community-demo",
+            "name": "Community Demo",
+            "version": "1.0.0",
+            "pack_type": "voice",
+            "category": "tts",
+            "provider": "community",
+            "checksum": "sha256:" + "1" * 64,
+            "license": "creator-specified",
+            "languages": ["en-US"],
+            "capabilities": ["voice-clone", "wav"],
+            "allowed_uses": ["personal"],
+            "consent_proof": "signed consent record",
+            "sample_sha256": "sha256:" + "2" * 64,
+            "provenance_required": True,
+            "watermark_required": True,
+            "compatibility": {"cpu": "x64", "gpu": False, "ram_mb": 4096},
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["accepted"] is True
+    assert payload["installable"] is False
+    assert payload["trust_level"] == "review_required"
+    assert any(issue["code"] == "signature_missing" for issue in payload["warnings"])
+
+
+def test_marketplace_manifest_requires_voice_consent_and_hash():
+    res = TestClient(app).post(
+        "/api/marketplace/validate",
+        json={
+            "id": "bad-voice",
+            "name": "Bad Voice",
+            "version": "1",
+            "pack_type": "voice",
+            "checksum": "sha256:" + "1" * 64,
+            "license": "unknown",
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["accepted"] is False
+    assert payload["trust_level"] == "blocked"
+    codes = {issue["code"] for issue in payload["errors"]}
+    assert {"consent_proof_required", "sample_hash_required", "allowed_uses_required"}.issubset(codes)
+
+
 def test_model_pack_unknown_pack_returns_structured_404():
     res = TestClient(app).post("/api/model-packs/nope/install")
 

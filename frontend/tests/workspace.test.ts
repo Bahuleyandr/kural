@@ -76,6 +76,17 @@ describe("workspace storage", () => {
         createdAt: new Date().toISOString(),
       },
     ];
+    project.voiceUseLog = [
+      {
+        id: createId("voiceuse"),
+        createdAt: new Date().toISOString(),
+        voiceId: "kokoro:af_bella",
+        voiceLabel: "Bella",
+        purpose: "synthesis",
+        language: "en-US",
+        textPreview: "Hello Kural",
+      },
+    ];
     await saveProject(project);
     const asset: AudioAsset = {
       id: createId("asset"),
@@ -88,7 +99,9 @@ describe("workspace storage", () => {
       bytes: 4,
       blob: new Blob(["RIFF"], { type: "audio/wav" }),
       controls: DEFAULT_CONTROLS,
+      mediaKind: "generated",
     };
+    project.dubbingMediaAssetId = asset.id;
     await saveAudioAsset(asset);
 
     const archive = await exportProjectArchive(project, [asset]);
@@ -97,6 +110,8 @@ describe("workspace storage", () => {
 
     expect(imported.name).toContain("Launch reads");
     expect(imported.scriptVersions).toHaveLength(1);
+    expect(imported.voiceUseLog).toHaveLength(1);
+    expect(imported.dubbingMediaAssetId).toBeTruthy();
     expect(reloaded.projects).toHaveLength(2);
   });
 });

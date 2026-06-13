@@ -49,6 +49,33 @@ const CLONE_PROMPTS = [
   },
 ];
 const CLONE_ALLOWED_USES = ["personal", "commercial", "parody", "internal", "restricted"] as const;
+const PRO_CLONE_LINES = [
+  "I am recording this line in my normal speaking voice.",
+  "The microphone stays at the same distance for every sentence.",
+  "A quiet room helps Kural hear the texture of my voice.",
+  "Today I am reading with a calm and steady rhythm.",
+  "Please capture the way I pause between short ideas.",
+  "This sentence has a little excitement, but the volume stays controlled.",
+  "I can speak slowly without sounding tired or unclear.",
+  "A natural smile changes the color of this sentence.",
+  "When I explain something, I keep my words crisp.",
+  "This is a documentary-style line with a measured tone.",
+  "This is a tutorial-style line with friendly confidence.",
+  "This is a softer line for a reflective moment.",
+  "This is a stronger line with clear emphasis on key words.",
+  "Numbers are useful: one, two, three, four, five.",
+  "Short names and product words should remain easy to understand.",
+  "I pause briefly here, then continue with the same volume.",
+  "A longer sentence gives the model more rhythm, breath, and phrasing to learn.",
+  "I am not whispering, shouting, or changing microphone position.",
+  "Background noise should remain lower than my speaking voice.",
+  "This line checks whether my accent stays consistent.",
+  "This line checks whether my vowels stay clear.",
+  "This line checks whether my consonants stay precise.",
+  "This line has a question at the end, does it sound natural?",
+  "This closing line should sound relaxed and complete.",
+  "I confirm this professional clone pack is recorded with consent.",
+];
 type CloneAllowedUse = (typeof CLONE_ALLOWED_USES)[number];
 type CloneTier = "quick" | "professional";
 
@@ -239,6 +266,10 @@ export function ClonePanel(props: {
   const [sampleScore, setSampleScore] = useState<SampleScore | null>(null);
   const [promptId, setPromptId] = useState(CLONE_PROMPTS[0].id);
   const [promptAccent, setPromptAccent] = useState("general");
+  const [proLineIndex, setProLineIndex] = useState(0);
+  const [completedProLines, setCompletedProLines] = useState<string[]>([]);
+  const [roomToneSeconds, setRoomToneSeconds] = useState(0);
+  const [consentStatementRead, setConsentStatementRead] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -450,6 +481,15 @@ export function ClonePanel(props: {
       requestedName: cloneName,
       consentConfirmed: cloneConsent,
       prompt: activePrompt,
+      proPack: {
+        enabled: cloneTier === "professional",
+        completedLines: completedProLines.length,
+        targetLines: PRO_CLONE_LINES.length,
+        activeLine: PRO_CLONE_LINES[proLineIndex],
+        roomToneSeconds,
+        accent: promptAccent,
+        consentStatementRead,
+      },
       score: sampleScore,
       recommendation: readinessLabel,
     };
@@ -691,6 +731,82 @@ export function ClonePanel(props: {
             </select>
           </label>
         </div>
+        {cloneTier === "professional" && (
+          <section className="rounded border border-slate-200 bg-white p-3" aria-label="Professional clone pack">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-medium">Pro Clone Pack</h3>
+                <p className="mt-1 text-xs text-slate-600">
+                  {completedProLines.length}/{PRO_CLONE_LINES.length} guided lines
+                </p>
+              </div>
+              <span className="rounded border border-slate-200 px-2 py-1 text-xs">
+                {promptAccent}
+              </span>
+            </div>
+            <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">Line {proLineIndex + 1}</span>
+                <select
+                  className="rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  value={proLineIndex}
+                  onChange={(event) => setProLineIndex(Number(event.target.value))}
+                  aria-label="Professional clone line"
+                >
+                  {PRO_CLONE_LINES.map((line, index) => (
+                    <option key={line} value={index}>
+                      {index + 1}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="mt-2">{PRO_CLONE_LINES[proLineIndex]}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  onClick={() => {
+                    const line = PRO_CLONE_LINES[proLineIndex];
+                    setCompletedProLines((current) =>
+                      current.includes(line) ? current : [...current, line]
+                    );
+                    setProLineIndex((current) => Math.min(PRO_CLONE_LINES.length - 1, current + 1));
+                  }}
+                >
+                  Mark Read
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  onClick={() => setCompletedProLines([])}
+                >
+                  Reset Lines
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <label className="text-sm">
+                Room tone seconds
+                <input
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  type="number"
+                  min={0}
+                  max={60}
+                  value={roomToneSeconds}
+                  onChange={(event) => setRoomToneSeconds(Number(event.target.value))}
+                />
+              </label>
+              <label className="flex items-center gap-2 self-end rounded border border-slate-300 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={consentStatementRead}
+                  onChange={(event) => setConsentStatementRead(event.target.checked)}
+                />
+                Consent statement read
+              </label>
+            </div>
+          </section>
+        )}
         <fieldset className="rounded border border-slate-200 p-3 text-sm">
           <legend className="px-1 font-medium">Allowed uses</legend>
           <div className="mt-2 flex flex-wrap gap-2">

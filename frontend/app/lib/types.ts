@@ -116,6 +116,49 @@ export interface ModelRouteRecommendation {
   reason: string;
 }
 
+export interface VoiceQualityBenchmarkResult {
+  id: string;
+  name: string;
+  category: LocalModelInfo["category"];
+  status: LocalModelInfo["status"];
+  score: number;
+  naturalness_score: number;
+  language_quality: number;
+  noise_score: number;
+  latency_ms: number;
+  memory_mb: number;
+  measured: boolean;
+  route_rank: number;
+  best_for: string[];
+  detail?: string | null;
+}
+
+export interface VoiceQualityBenchmarkResponse {
+  measured_at: string;
+  language: string;
+  capability: string;
+  use_case: string;
+  sample_scripts: string[];
+  results: VoiceQualityBenchmarkResult[];
+  recommendation?: ModelRouteRecommendation | null;
+}
+
+export interface MarketplaceValidationIssue {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+}
+
+export interface MarketplaceValidationResponse {
+  accepted: boolean;
+  installable: boolean;
+  trust_level: "verified" | "review_required" | "blocked";
+  score: number;
+  manifest_digest: string;
+  errors: MarketplaceValidationIssue[];
+  warnings: MarketplaceValidationIssue[];
+}
+
 export interface AlignmentWord {
   text: string;
   start_ms: number;

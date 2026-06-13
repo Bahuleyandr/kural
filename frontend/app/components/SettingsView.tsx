@@ -35,6 +35,7 @@ export function SettingsView(props: {
       />
       <PrivacySafetyPanel
         apiUrl={props.apiUrl}
+        activeProject={props.activeProject}
         clones={props.clones}
         assets={props.assets}
         models={props.models}

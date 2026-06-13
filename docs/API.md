@@ -28,7 +28,13 @@ Kural reports optional local ASR and translation adapters without downloading mo
 ```bash
 curl http://localhost:8000/api/model-packs
 curl http://localhost:8000/api/model-packs/benchmarks
+curl -X POST http://localhost:8000/api/model-packs/benchmarks/run \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en-US","capability":"tts","use_case":"dubbing"}'
 curl "http://localhost:8000/api/model-packs/recommend?language=en-US&capability=tts"
+curl -X POST http://localhost:8000/api/marketplace/validate \
+  -H "Content-Type: application/json" \
+  -d @community-pack-manifest.json
 curl -X POST http://localhost:8000/api/model-packs/kokoro-v1-onnx/install
 curl -X POST http://localhost:8000/api/model-packs/faster-whisper/update
 curl -X DELETE http://localhost:8000/api/model-packs/jobs/<job-id>
@@ -36,7 +42,9 @@ curl -X DELETE http://localhost:8000/api/model-packs/jobs/<job-id>
 
 The model-pack API is the only path the UI uses for installs/removals. Each action is a backend-defined safe operation; the browser never runs arbitrary shell commands. Pack records include `id`, `version`, `source_url`, `checksum`, `license`, `disk_size_mb`, `installed_path`, `languages`, `capabilities`, `requires_confirmation`, `non_commercial`, compatibility metadata, provenance requirements, and supported `actions`.
 
-`/api/model-packs/benchmarks` returns local benchmark estimates for quality, naturalness, language quality, latency, memory, and best-fit routing hints. `/api/model-packs/recommend` returns the best current pack for a requested language and capability using readiness, quality, latency, and routing hints.
+`/api/model-packs/benchmarks` returns local benchmark estimates for quality, naturalness, language quality, latency, memory, and best-fit routing hints. `/api/model-packs/benchmarks/run` ranks installed and configured candidates for a requested language/use case with timed local probes and sample-script complexity. `/api/model-packs/recommend` returns the best current pack for a requested language and capability using readiness, quality, latency, and routing hints.
+
+`/api/marketplace/validate` validates community voice/model manifests before install. Voice packs must include consent proof, sample hash, allowed uses, payload checksum, license, compatibility metadata, and provenance/watermark posture; unsigned packs can be reviewed but are not installable.
 
 Background jobs use one shared shape:
 
@@ -169,15 +177,34 @@ curl -X POST http://localhost:8000/api/mux \
 
 The mux command is fixed server-side (`-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -shortest`). If ffmpeg is missing, Kural returns `503` with `detail.code="ffmpeg_unavailable"`.
 
+Optional lip-sync is surfaced as a safe runtime probe only:
+
+```bash
+curl http://localhost:8000/api/lip-sync/status
+```
+
+Kural does not launch arbitrary lip-sync commands from the UI. Configure `KURAL_LIP_SYNC_BINARY` to point at a vetted local binary before enabling lip-sync render actions.
+
 ## Local Agent
 
-Kural Agents v1 is local and deterministic. It returns workflow guidance and tool-plan tags that the frontend can speak through the existing local TTS pipeline:
+Kural Agents v1 is local and deterministic by default. The frontend can also opt into a loopback Ollama call (`KURAL_OLLAMA_URL`, `KURAL_OLLAMA_MODEL`) and still falls back to deterministic workflow planning when Ollama is unavailable. Responses can be spoken through the existing local TTS pipeline:
 
 ```bash
 curl -X POST http://localhost:8000/api/agent/respond \
   -H "Content-Type: application/json" \
   -d '{"message":"Help me clone a voice","project_language":"en-US"}'
 ```
+
+## Runtime And Provenance
+
+```bash
+curl http://localhost:8000/api/runtime/health-checks
+curl -X POST http://localhost:8000/api/provenance/sidecar \
+  -H "Content-Type: application/json" \
+  -d '{"project_id":"p1","asset_name":"clip.wav","voice_label":"Bella"}'
+```
+
+`/api/runtime/health-checks` reports Kokoro model files, clone storage, ffmpeg, lip-sync configuration, and sampled model-cache storage. `/api/provenance/sidecar` creates the synthetic-audio sidecar shape used by exports.
 
 ## Local Project Archives
 

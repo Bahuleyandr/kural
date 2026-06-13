@@ -12,6 +12,7 @@ const SSML_CHIPS = [
   { label: "Spell out", value: '<say-as interpret-as="characters">Kural</say-as>' },
   { label: "Phoneme", value: '<phoneme alphabet="ipa" ph="kuːrəl">Kural</phoneme>' },
 ];
+const FILLER_WORDS = ["um", "uh", "like", "you know", "sort of", "kind of", "basically", "actually"];
 
 function analyzeScript(text: string) {
   const words = text.trim().split(/\s+/).filter(Boolean);
@@ -26,11 +27,17 @@ function analyzeScript(text: string) {
   if (words.length > 40 && !/[,.!?]/.test(text)) issues.push("Add punctuation before synthesis.");
   if (/\s{3,}/.test(text)) issues.push("Collapse extra spacing to avoid odd pauses.");
   if (/[A-Z]{8,}/.test(text)) issues.push("Avoid long all-caps words unless shouting is intended.");
+  const fillerMatches = FILLER_WORDS.flatMap((word) => {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.match(new RegExp(`\\b${escaped}\\b`, "gi")) || [];
+  });
   return {
     words: words.length,
     sentences: sentences.length,
     longestSentence,
     estimatedSeconds,
+    fillerWords: fillerMatches.length,
+    fillerList: Array.from(new Set(fillerMatches.map((word) => word.toLowerCase()))),
     issues,
   };
 }
@@ -44,6 +51,7 @@ export function ScriptStudio(props: {
   onGenerateSelection: (value: string) => void;
   onRestoreVersion: (version: ScriptVersion) => void;
   onSaveVersion: () => void;
+  onExportCaptions: () => void;
   onSsmlEnabledChange: (value: boolean) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -159,7 +167,7 @@ export function ScriptStudio(props: {
         ))}
       </div>
 
-      <div className="mt-3 grid gap-2 text-sm md:grid-cols-4">
+      <div className="mt-3 grid gap-2 text-sm md:grid-cols-5">
         <div className="rounded border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs uppercase text-slate-500">Words</p>
           <p className="font-semibold">{stats.words}</p>
@@ -176,7 +184,20 @@ export function ScriptStudio(props: {
           <p className="text-xs uppercase text-slate-500">Read time</p>
           <p className="font-semibold">{stats.estimatedSeconds}s</p>
         </div>
+        <div className="rounded border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase text-slate-500">Fillers</p>
+          <p className="font-semibold">{stats.fillerWords}</p>
+        </div>
       </div>
+      {stats.fillerList.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1 text-xs text-slate-600">
+          {stats.fillerList.map((word) => (
+            <span key={word} className="rounded border border-amber-200 bg-amber-50 px-2 py-1">
+              {word}
+            </span>
+          ))}
+        </div>
+      )}
       {stats.issues.length > 0 && (
         <ul className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
           {stats.issues.map((issue) => (
@@ -269,6 +290,13 @@ export function ScriptStudio(props: {
           onClick={() => props.onGenerateSelection(selectedTextOrLine())}
         >
           Generate Selection
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={props.onExportCaptions}
+        >
+          Export Captions
         </button>
       </div>
 

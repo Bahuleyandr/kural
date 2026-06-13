@@ -9,10 +9,12 @@ export function DubbingTimeline(props: {
   assets: AudioAsset[];
   audioUrls: Record<string, string>;
   assetDurations: Record<string, number>;
+  sourceMediaAsset: AudioAsset | null;
   voiceOptions: VoiceOption[];
   selectedVoiceKey: string;
   isTranscribing: boolean;
   isTranslating: boolean;
+  lipSyncMessage: string;
   localModelPanel: ReactNode;
   onImportTranscript: (event: ChangeEvent<HTMLInputElement>) => void;
   onImportMedia: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -27,12 +29,16 @@ export function DubbingTimeline(props: {
   onApplySuggestedSpeed: (segment: DubbingSegment) => void;
   onApplySpeakerVoice: (speaker: string, voiceId: string) => void;
   onApplySpeakerSpeed: (speaker: string, speed: number) => void;
+  onCheckLipSync: () => void;
   onInferSpeakers: () => void;
   onExportTimeline: () => void;
   onExportMuxMp4: (event: ChangeEvent<HTMLInputElement>) => void;
   onExportRenderPlan: () => void;
   onExportMuxScript: () => void;
   onExportTranscript: (format: "srt" | "vtt" | "csv") => void;
+  onRetimingAll: () => void;
+  onRetimingSegment: (segment: DubbingSegment) => void;
+  onUpdateAlignedWord: (segmentId: string, wordIndex: number, text: string) => void;
   onUpdateSegment: (segmentId: string, fields: Partial<DubbingSegment>) => void;
 }) {
   const maxEnd = Math.max(1, ...props.segments.map((segment) => segment.endMs));
@@ -57,6 +63,11 @@ export function DubbingTimeline(props: {
       Math.max(1, segments.length);
     return { speaker, segments, ready, voiceId, speed };
   });
+  const sourceMediaUrl = props.sourceMediaAsset
+    ? props.audioUrls[props.sourceMediaAsset.id]
+    : "";
+  const isSourceVideo =
+    props.sourceMediaAsset?.format === "mp4" || props.sourceMediaAsset?.format === "mov";
 
   return (
     <section className="space-y-4" aria-labelledby="dubbing-timeline-heading">
@@ -126,6 +137,21 @@ export function DubbingTimeline(props: {
           </button>
           <button
             type="button"
+            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+            disabled={props.segments.length === 0}
+            onClick={props.onRetimingAll}
+          >
+            Retiming Fit
+          </button>
+          <button
+            type="button"
+            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+            onClick={props.onCheckLipSync}
+          >
+            Lip Sync
+          </button>
+          <button
+            type="button"
             className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             onClick={props.onExportTimeline}
           >
@@ -174,7 +200,43 @@ export function DubbingTimeline(props: {
             {overrunCount ? ` / ${overrunCount} overrun` : ""}
           </span>
         </div>
+        {props.lipSyncMessage && (
+          <p className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            {props.lipSyncMessage}
+          </p>
+        )}
       </div>
+
+      {props.sourceMediaAsset && sourceMediaUrl && (
+        <section className="rounded border border-slate-300 bg-white p-4" aria-label="Source media preview">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">Source Media</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {props.sourceMediaAsset.name} / {(props.sourceMediaAsset.bytes / 1024 / 1024).toFixed(2)} MB
+              </p>
+            </div>
+            <span className="rounded border border-slate-200 px-3 py-1 text-sm uppercase">
+              {props.sourceMediaAsset.format}
+            </span>
+          </div>
+          {isSourceVideo ? (
+            <video
+              className="mt-3 max-h-[420px] w-full rounded border border-slate-200 bg-black"
+              controls
+              src={sourceMediaUrl}
+              aria-label="Source video preview"
+            />
+          ) : (
+            <audio
+              className="mt-3 w-full"
+              controls
+              src={sourceMediaUrl}
+              aria-label="Source audio preview"
+            />
+          )}
+        </section>
+      )}
 
       {props.segments.length > 0 && (
         <section className="rounded border border-slate-300 bg-white p-4" aria-label="Speaker tracks">
@@ -278,6 +340,25 @@ export function DubbingTimeline(props: {
               );
             })}
           </div>
+          <div className="mt-3 grid h-20 grid-cols-[repeat(60,minmax(3px,1fr))] items-end gap-px rounded border border-slate-200 bg-white p-2">
+            {Array.from({ length: 60 }).map((_, index) => {
+              const at = (index / 60) * maxEnd;
+              const active = props.segments.find(
+                (segment) => at >= segment.startMs && at <= segment.endMs
+              );
+              const height = active
+                ? 24 + ((active.targetText.length + index * 7) % 44)
+                : 8;
+              return (
+                <span
+                  key={index}
+                  className={`block rounded-sm ${active ? "bg-slate-600" : "bg-slate-200"}`}
+                  style={{ height }}
+                  aria-hidden="true"
+                />
+              );
+            })}
+          </div>
         </section>
       )}
 
@@ -338,6 +419,14 @@ export function DubbingTimeline(props: {
                     onClick={() => props.onMergeWithNext(segment)}
                   >
                     Merge Next
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+                    disabled={!asset}
+                    onClick={() => props.onRetimingSegment(segment)}
+                  >
+                    Retiming
                   </button>
                   <button
                     type="button"
@@ -440,9 +529,20 @@ export function DubbingTimeline(props: {
                     </span>
                   </div>
                   {segment.alignment.words.length > 0 && (
-                    <p className="mt-2 line-clamp-2">
-                      {segment.alignment.words.slice(0, 12).map((word) => word.text).join(" ")}
-                    </p>
+                    <div className="mt-2 flex max-h-32 flex-wrap gap-1 overflow-auto">
+                      {segment.alignment.words.map((word, wordIndex) => (
+                        <input
+                          key={`${segment.id}-${wordIndex}`}
+                          className="w-24 rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+                          value={word.text}
+                          aria-label={`Word ${wordIndex + 1} for segment ${index + 1}`}
+                          title={`${formatTime(word.startMs)}-${formatTime(word.endMs)}`}
+                          onChange={(event) =>
+                            props.onUpdateAlignedWord(segment.id, wordIndex, event.target.value)
+                          }
+                        />
+                      ))}
+                    </div>
                   )}
                   {segment.alignment.overrunMs > 0 && (
                     <button

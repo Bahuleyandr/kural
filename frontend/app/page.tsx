@@ -80,6 +80,7 @@ import {
   type PronunciationProfile,
   type PronunciationRule,
   type ScriptVersion,
+  type VoiceUseLogEntry,
   type VoicePreset,
 } from "./lib/workspace";
 
@@ -136,6 +137,7 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [lipSyncMessage, setLipSyncMessage] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -174,6 +176,13 @@ export default function Home() {
       activeProject?.pronunciationProfiles[0] ??
       null,
     [activeProject]
+  );
+  const sourceMediaAsset = useMemo(
+    () =>
+      activeProject?.dubbingMediaAssetId
+        ? assets.find((asset) => asset.id === activeProject.dubbingMediaAssetId) ?? null
+        : null,
+    [activeProject?.dubbingMediaAssetId, assets]
   );
   const visibleProjects = useMemo(() => {
     const query = projectSearch.trim().toLowerCase();
@@ -343,6 +352,37 @@ export default function Home() {
     persistProject({ ...activeProject, ...fields });
   }
 
+  function recordVoiceUse(entry: Omit<VoiceUseLogEntry, "id" | "createdAt">) {
+    if (!activeProject) return;
+    const nextEntry: VoiceUseLogEntry = {
+      id: createId("voiceuse"),
+      createdAt: new Date().toISOString(),
+      ...entry,
+    };
+    setProjects((current) =>
+      current.map((project) => {
+        if (project.id !== activeProject.id) return project;
+        const next = {
+          ...project,
+          voiceUseLog: [nextEntry, ...(project.voiceUseLog || [])].slice(0, 500),
+          updatedAt: new Date().toISOString(),
+        };
+        void saveProject(next).catch((exc) => {
+          setWorkspaceError(exc instanceof Error ? exc.message : "Could not save voice-use log");
+        });
+        return next;
+      })
+    );
+  }
+
+  function inferAssetFormat(file: File): OutputFormat {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".mp4") || file.type === "video/mp4") return "mp4";
+    if (lower.endsWith(".mov") || file.type === "video/quicktime") return "mov";
+    if (lower.endsWith(".mp3") || file.type.includes("mpeg")) return "mp3";
+    return "wav";
+  }
+
   async function createSampleProject() {
     const project = createProject("Offline Creator Pro sample");
     const now = new Date().toISOString();
@@ -504,11 +544,21 @@ export default function Home() {
         createdAt: new Date().toISOString(),
         bytes: blob.size,
         blob,
+        mediaKind: "generated",
+        sourceDocumentId: activeDocument?.id,
         language: activeProject.targetLanguage,
         controls,
       };
       await saveAudioAsset(asset);
       setAssets((current) => [asset, ...current]);
+      recordVoiceUse({
+        voiceId: selectedVoiceKey,
+        voiceLabel: selectedVoiceLabel(selectedVoiceKey),
+        purpose: "synthesis",
+        language: activeProject.targetLanguage,
+        assetId: asset.id,
+        textPreview: cleanText.slice(0, 160),
+      });
       setActiveView("library");
       setSuccess("Generated selected script line into the audio library.");
     } catch (exc) {
@@ -516,6 +566,34 @@ export default function Home() {
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  function exportScriptCaptions() {
+    if (!activeProject || !activeDocument) return;
+    const lines = activeDocument.text
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      setError("Write a script before exporting captions.");
+      return;
+    }
+    let cursor = 0;
+    const srt = lines
+      .map((line, index) => {
+        const words = line.split(/\s+/).filter(Boolean).length;
+        const duration = Math.max(1800, Math.round((words / 155) * 60_000));
+        const block = `${index + 1}\n${formatTime(cursor).replace(".", ",")} --> ${formatTime(
+          cursor + duration
+        ).replace(".", ",")}\n${line}`;
+        cursor += duration + 120;
+        return block;
+      })
+      .join("\n\n");
+    downloadBlob(
+      new Blob([srt], { type: "text/plain" }),
+      `${activeProject.name || "kural"}-script.srt`
+    );
   }
 
   async function synthesizeAgentResponse(text: string): Promise<Blob> {
@@ -531,11 +609,20 @@ export default function Home() {
       createdAt: new Date().toISOString(),
       bytes: blob.size,
       blob,
+      mediaKind: "agent-response",
       language: activeProject.targetLanguage,
       controls,
     };
     await saveAudioAsset(asset);
     setAssets((current) => [asset, ...current]);
+    recordVoiceUse({
+      voiceId: selectedVoiceKey,
+      voiceLabel: selectedVoiceLabel(selectedVoiceKey),
+      purpose: "agent",
+      language: activeProject.targetLanguage,
+      assetId: asset.id,
+      textPreview: text.slice(0, 160),
+    });
     return blob;
   }
 
@@ -587,11 +674,21 @@ export default function Home() {
           createdAt: new Date().toISOString(),
           bytes: blob.size,
           blob,
+          mediaKind: "generated",
+          sourceDocumentId: activeDocument.id,
           language: activeProject.targetLanguage,
           controls,
         };
         await saveAudioAsset(asset);
         newAssets.push(asset);
+        recordVoiceUse({
+          voiceId: selectedVoiceKey,
+          voiceLabel: selectedVoiceLabel(selectedVoiceKey),
+          purpose: "synthesis",
+          language: activeProject.targetLanguage,
+          assetId: asset.id,
+          textPreview: item.slice(0, 160),
+        });
       }
 
       setAssets((current) => [...newAssets, ...current]);
@@ -639,11 +736,21 @@ export default function Home() {
       createdAt: new Date().toISOString(),
       bytes: blob.size,
       blob,
+      mediaKind: "generated",
+      sourceDocumentId: activeDocument?.id,
       language: activeProject.targetLanguage,
       controls: request.controls,
     };
     await saveAudioAsset(asset);
     setAssets((current) => [asset, ...current]);
+    recordVoiceUse({
+      voiceId: request.voiceKey,
+      voiceLabel: selectedVoiceLabel(request.voiceKey),
+      purpose: "synthesis",
+      language: activeProject.targetLanguage,
+      assetId: asset.id,
+      textPreview: request.text.slice(0, 160),
+    });
     return {
       id: asset.id,
       label: style.label,
@@ -887,6 +994,24 @@ export default function Home() {
     setError("");
     setSuccess("");
     try {
+      const mediaAsset: AudioAsset = {
+        id: createId("asset"),
+        projectId: activeProject.id,
+        name: file.name || "Imported source media",
+        text: "Source media for dubbing",
+        voiceLabel: "Source media",
+        format: inferAssetFormat(file),
+        createdAt: new Date().toISOString(),
+        bytes: file.size,
+        blob: file,
+        mediaKind: "source-media",
+        language: activeProject.sourceLanguage,
+      };
+      await saveAudioAsset(mediaAsset);
+      setAssets((current) => [mediaAsset, ...current.filter((asset) => asset.id !== mediaAsset.id)]);
+      const projectWithMedia = { ...activeProject, dubbingMediaAssetId: mediaAsset.id };
+      persistProject(projectWithMedia);
+
       const form = new FormData();
       form.append("file", file);
       form.append("language", activeProject.sourceLanguage);
@@ -924,7 +1049,7 @@ export default function Home() {
         });
       if (imported.length === 0) throw new Error("No speech segments found");
       persistProject({
-        ...activeProject,
+        ...projectWithMedia,
         dubbingSegments: imported,
         documents: activeProject.documents.map((document) =>
           document.id === activeProject.activeDocumentId
@@ -1202,11 +1327,21 @@ export default function Home() {
         bytes: generated.blob.size,
         blob: generated.blob,
         dubbingSegmentId: segment.id,
+        mediaKind: "generated",
         language: segment.targetLanguage,
         controls: segment.controls,
       };
       await saveAudioAsset(asset);
       setAssets((current) => [asset, ...current]);
+      recordVoiceUse({
+        voiceId: segment.voiceId || selectedVoiceKey,
+        voiceLabel: selectedVoiceLabel(segment.voiceId || selectedVoiceKey),
+        purpose: "dubbing",
+        language: segment.targetLanguage,
+        assetId: asset.id,
+        segmentId: segment.id,
+        textPreview: (segment.targetText || segment.sourceText).slice(0, 160),
+      });
       updateSegment(segment.id, { status: "ready", audioAssetId: asset.id, error: undefined });
       void alignSegment({ ...segment, status: "ready", audioAssetId: asset.id }, asset);
     } catch (exc) {
@@ -1288,6 +1423,85 @@ export default function Home() {
         error: exc instanceof Error ? exc.message : "Could not align segment",
       });
       setError(exc instanceof Error ? exc.message : "Could not align segment");
+    }
+  }
+
+  function updateAlignedWord(segmentId: string, wordIndex: number, text: string) {
+    if (!activeProject) return;
+    const segment = activeProject.dubbingSegments.find((item) => item.id === segmentId);
+    if (!segment?.alignment) return;
+    const words = segment.alignment.words.map((word, index) =>
+      index === wordIndex ? { ...word, text } : word
+    );
+    updateSegment(segmentId, {
+      alignment: { ...segment.alignment, words },
+      targetText: words.map((word) => word.text).join(" ").replace(/\s+([,.!?;:])/g, "$1"),
+      status: "draft",
+      audioAssetId: undefined,
+      notes: `${segment.notes ? `${segment.notes}; ` : ""}word transcript edited`,
+    });
+  }
+
+  function retimeSegmentToAudio(segment: DubbingSegment) {
+    if (!segment.audioAssetId) {
+      updateSegment(segment.id, { error: "Render this segment before retiming." });
+      return;
+    }
+    const duration = assetDurations[segment.audioAssetId] || 0;
+    if (!duration) {
+      updateSegment(segment.id, { error: "Could not measure rendered clip duration yet." });
+      return;
+    }
+    updateSegment(segment.id, {
+      endMs: segment.startMs + duration,
+      notes: `${segment.notes ? `${segment.notes}; ` : ""}retimed to rendered audio`,
+      alignment: segment.alignment
+        ? { ...segment.alignment, durationMs: duration, overrunMs: 0 }
+        : undefined,
+    });
+  }
+
+  function retimeAllSegmentsToAudio() {
+    if (!activeProject) return;
+    let changed = 0;
+    const retimed = activeProject.dubbingSegments.map((segment) => {
+      if (!segment.audioAssetId) return segment;
+      const duration = assetDurations[segment.audioAssetId] || 0;
+      if (!duration) return segment;
+      changed += 1;
+      return {
+        ...segment,
+        endMs: segment.startMs + duration,
+        notes: `${segment.notes ? `${segment.notes}; ` : ""}retimed to rendered audio`,
+        alignment: segment.alignment
+          ? { ...segment.alignment, durationMs: duration, overrunMs: 0 }
+          : segment.alignment,
+      };
+    });
+    persistProject({ ...activeProject, dubbingSegments: retimed });
+    setSuccess(`Retimed ${changed} segment${changed === 1 ? "" : "s"} to rendered audio.`);
+  }
+
+  async function checkLipSyncStatus() {
+    setLipSyncMessage("");
+    setError("");
+    try {
+      const res = await apiFetch(`${apiUrl}/api/lip-sync/status`);
+      if (!res.ok) throw new Error(await readApiError(res));
+      const data = (await res.json()) as {
+        available: boolean;
+        provider: string;
+        detail: string;
+      };
+      const message = data.available
+        ? `Lip-sync runtime ready: ${data.provider}.`
+        : data.detail;
+      setLipSyncMessage(message);
+      if (!data.available) setError(message);
+    } catch (exc) {
+      const message = exc instanceof Error ? exc.message : "Could not check lip-sync runtime.";
+      setLipSyncMessage(message);
+      setError(message);
     }
   }
 
@@ -1530,7 +1744,9 @@ export default function Home() {
         bytes: asset.bytes,
         createdAt: asset.createdAt,
         dubbingSegmentId: asset.dubbingSegmentId,
+        mediaKind: asset.mediaKind || "generated",
       })),
+      voiceUseLog: activeProject.voiceUseLog || [],
     };
     downloadBlob(
       new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
@@ -1839,6 +2055,7 @@ export default function Home() {
                     versions={(activeProject.scriptVersions || []).filter(
                       (version) => version.documentId === activeDocument.id
                     )}
+                    onExportCaptions={exportScriptCaptions}
                     onGenerateSelection={(value) => void generateSelectedScriptAudio(value)}
                     onRestoreVersion={restoreScriptVersion}
                     onSaveVersion={saveScriptVersion}
@@ -2081,8 +2298,10 @@ export default function Home() {
                   assetDurations={assetDurations}
                   assets={assets}
                   audioUrls={audioUrls}
+                  sourceMediaAsset={sourceMediaAsset}
                   isTranscribing={isTranscribing}
                   isTranslating={isTranslating}
+                  lipSyncMessage={lipSyncMessage}
                   localModelPanel={<LocalModelPanel models={localModels} error={localModelError} />}
                   selectedVoiceKey={selectedVoiceKey}
                   segments={activeProject.dubbingSegments}
@@ -2095,17 +2314,21 @@ export default function Home() {
                   onApplySuggestedSpeed={applySuggestedSegmentSpeed}
                   onApplySpeakerSpeed={applySpeakerSpeed}
                   onApplySpeakerVoice={applySpeakerVoice}
+                  onCheckLipSync={() => void checkLipSyncStatus()}
                   onImportMedia={transcribeMediaFile}
                   onImportTranscript={importTranscriptFile}
                   onInferSpeakers={inferDubbingSpeakers}
                   onMergeWithNext={mergeSegmentWithNext}
                   onExportMuxScript={exportDubbingMuxScript}
+                  onRetimingAll={retimeAllSegmentsToAudio}
+                  onRetimingSegment={retimeSegmentToAudio}
                   onRenderAll={() => void renderAllSegments()}
                   onRenderSegment={(segment) => void renderSegment(segment)}
                   onRetryFailed={() => void retryFailedSegments()}
                   onSplitSegment={splitSegment}
                   onTranslateAll={() => void translateAllSegments()}
                   onTranslateSegment={(segment) => void translateSegment(segment)}
+                  onUpdateAlignedWord={updateAlignedWord}
                   onUpdateSegment={updateSegment}
                 />
               </div>

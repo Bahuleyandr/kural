@@ -103,6 +103,120 @@ class ModelRouteRecommendation(BaseModel):
     reason: str
 
 
+class VoiceQualityBenchmarkRequest(BaseModel):
+    language: str = Field(default="en-US", min_length=2, max_length=16)
+    capability: str = Field(default="tts", max_length=40)
+    use_case: Literal["narration", "dubbing", "clone", "agent", "audiobook"] = "narration"
+    sample_scripts: list[str] = Field(default_factory=list, max_length=6)
+
+
+class VoiceQualityBenchmarkResult(BaseModel):
+    id: str
+    name: str
+    category: LocalModelCategory
+    status: LocalModelStatus
+    score: int = Field(..., ge=0, le=100)
+    naturalness_score: int = Field(..., ge=0, le=100)
+    language_quality: int = Field(..., ge=0, le=100)
+    noise_score: int = Field(..., ge=0, le=100)
+    latency_ms: int = Field(..., ge=0)
+    memory_mb: int = Field(..., ge=0)
+    measured: bool
+    route_rank: int = Field(..., ge=1)
+    best_for: list[str] = Field(default_factory=list)
+    detail: Optional[str] = None
+
+
+class VoiceQualityBenchmarkResponse(BaseModel):
+    measured_at: str
+    language: str
+    capability: str
+    use_case: str
+    sample_scripts: list[str]
+    results: list[VoiceQualityBenchmarkResult]
+    recommendation: Optional[ModelRouteRecommendation] = None
+
+
+class MarketplacePackManifest(BaseModel):
+    id: str = Field(..., min_length=3, max_length=100)
+    name: str = Field(..., min_length=1, max_length=120)
+    version: str = Field(..., min_length=1, max_length=40)
+    pack_type: Literal["voice", "model"]
+    category: Optional[LocalModelCategory] = None
+    provider: str = Field(default="community", max_length=80)
+    source_url: Optional[str] = Field(default=None, max_length=500)
+    checksum: Optional[str] = Field(default=None, max_length=96)
+    license: str = Field(default="", max_length=120)
+    languages: list[str] = Field(default_factory=list, max_length=64)
+    capabilities: list[str] = Field(default_factory=list, max_length=64)
+    allowed_uses: list[AllowedVoiceUse] = Field(default_factory=list)
+    consent_proof: Optional[str] = Field(default=None, max_length=500)
+    sample_sha256: Optional[str] = Field(default=None, max_length=96)
+    signature: Optional[str] = Field(default=None, max_length=512)
+    provenance_required: bool = True
+    watermark_required: bool = True
+    compatibility: dict[str, str | int | bool | list[str]] = Field(default_factory=dict)
+
+
+class MarketplaceValidationIssue(BaseModel):
+    code: str
+    severity: Literal["error", "warning"]
+    message: str
+
+
+class MarketplaceValidationResponse(BaseModel):
+    accepted: bool
+    installable: bool
+    trust_level: Literal["verified", "review_required", "blocked"]
+    score: int = Field(..., ge=0, le=100)
+    manifest_digest: str
+    errors: list[MarketplaceValidationIssue] = Field(default_factory=list)
+    warnings: list[MarketplaceValidationIssue] = Field(default_factory=list)
+
+
+class RuntimeCheck(BaseModel):
+    id: str
+    label: str
+    status: Literal["ready", "warning", "missing", "error"]
+    detail: str
+    repair_action: Optional[str] = None
+
+
+class RuntimeHealthChecksResponse(BaseModel):
+    status: Literal["ready", "needs_setup", "error"]
+    checks: list[RuntimeCheck]
+    storage: dict[str, str | int | bool]
+
+
+class LipSyncStatusResponse(BaseModel):
+    available: bool
+    provider: str = "none"
+    detail: str
+    supported_formats: list[str] = Field(default_factory=lambda: ["mp4", "wav"])
+    safe_action: Optional[str] = None
+
+
+class ProvenanceSidecarRequest(BaseModel):
+    project_id: str = Field(..., min_length=1, max_length=160)
+    project_name: str = Field(default="Kural project", max_length=200)
+    asset_name: str = Field(default="Kural export", max_length=200)
+    voice_label: str = Field(default="local voice", max_length=200)
+    language: Optional[str] = Field(default=None, max_length=16)
+    text_sha256: Optional[str] = Field(default=None, max_length=96)
+    export_format: str = Field(default="wav", max_length=16)
+    watermark_enabled: bool = False
+    segments: list[dict[str, str | int | float | bool | None]] = Field(default_factory=list)
+
+
+class ProvenanceSidecarResponse(BaseModel):
+    schema_version: int = 1
+    kind: str = "kural-synthetic-audio-provenance"
+    generated_at: str
+    local_only: bool = True
+    disclosure: str
+    payload: dict[str, object]
+
+
 class AudioControls(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     pitch_semitones: float = Field(default=0.0, ge=-6.0, le=6.0)
@@ -228,6 +342,9 @@ class AgentTurnRequest(BaseModel):
     mode: Literal["assistant", "workflow", "voiceover"] = "assistant"
     project_language: Optional[str] = Field(default=None, max_length=16)
     tool_context: list[str] = Field(default_factory=list)
+    use_llm: bool = False
+    llm_provider: Literal["deterministic", "ollama"] = "deterministic"
+    llm_model: Optional[str] = Field(default=None, max_length=120)
 
 
 class AgentTurnResponse(BaseModel):
@@ -236,6 +353,8 @@ class AgentTurnResponse(BaseModel):
     tool_plan: list[str] = Field(default_factory=list)
     interruptible: bool = True
     local_only: bool = True
+    llm_provider: str = "deterministic"
+    llm_model: Optional[str] = None
 
 
 class ClonesListResponse(BaseModel):

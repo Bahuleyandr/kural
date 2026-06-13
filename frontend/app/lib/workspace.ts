@@ -3,7 +3,7 @@ import JSZip from "jszip";
 import { loadAudioItems } from "./audioLibrary";
 import type { VoiceKind } from "./types";
 
-export type OutputFormat = "wav" | "mp3";
+export type OutputFormat = "wav" | "mp3" | "mp4" | "mov";
 export type PronunciationMode = "literal" | "word";
 export type DubbingStatus = "draft" | "rendering" | "ready" | "error";
 
@@ -89,6 +89,18 @@ export interface DubbingSegment {
   };
 }
 
+export interface VoiceUseLogEntry {
+  id: string;
+  createdAt: string;
+  voiceId: string;
+  voiceLabel: string;
+  purpose: "synthesis" | "dubbing" | "agent" | "clone-test";
+  language?: string;
+  assetId?: string;
+  segmentId?: string;
+  textPreview: string;
+}
+
 export interface KuralProject {
   id: string;
   name: string;
@@ -105,11 +117,13 @@ export interface KuralProject {
   updatedAt: string;
   activeDocumentId: string;
   activePronunciationProfileId: string;
+  dubbingMediaAssetId?: string;
   documents: ProjectDocument[];
   voicePresets: VoicePreset[];
   pronunciationProfiles: PronunciationProfile[];
   dubbingSegments: DubbingSegment[];
   scriptVersions: ScriptVersion[];
+  voiceUseLog: VoiceUseLogEntry[];
 }
 
 export interface AudioAsset {
@@ -123,6 +137,9 @@ export interface AudioAsset {
   bytes: number;
   blob: Blob;
   dubbingSegmentId?: string;
+  mediaKind?: "generated" | "source-media" | "dubbing-export" | "agent-response";
+  sourceDocumentId?: string;
+  sourceRange?: { start: number; end: number };
   language?: string;
   controls?: AudioControls;
 }
@@ -278,8 +295,9 @@ export function createProject(name = "Untitled project"): KuralProject {
     ],
     voicePresets: [],
     pronunciationProfiles: [profile],
-    dubbingSegments: [],
-    scriptVersions: [],
+      dubbingSegments: [],
+      scriptVersions: [],
+      voiceUseLog: [],
   };
 }
 
@@ -292,6 +310,7 @@ function normalizeProject(project: KuralProject): KuralProject {
     documents: project.documents || [],
     voicePresets: project.voicePresets || [],
     scriptVersions: project.scriptVersions || [],
+    voiceUseLog: project.voiceUseLog || [],
     pronunciationProfiles: (project.pronunciationProfiles || [createDefaultPronunciationProfile()]).map(
       (profile) => ({
         ...profile,
@@ -387,9 +406,10 @@ async function migrateLegacyHistory(projectId: string): Promise<void> {
           voiceLabel: item.voiceLabel,
           format: item.format,
           createdAt: item.createdAt,
-          bytes: item.bytes,
-          blob: item.blob,
-        })
+      bytes: item.bytes,
+      blob: item.blob,
+      mediaKind: "generated",
+    })
       )
     );
   } catch {
@@ -443,6 +463,9 @@ export async function exportProjectArchive(
       createdAt: asset.createdAt,
       bytes: asset.bytes,
       dubbingSegmentId: asset.dubbingSegmentId,
+      mediaKind: asset.mediaKind,
+      sourceDocumentId: asset.sourceDocumentId,
+      sourceRange: asset.sourceRange,
       language: asset.language,
       controls: asset.controls,
       path,
@@ -498,6 +521,9 @@ export async function importProjectArchive(file: File): Promise<KuralProject> {
     ...segment,
     audioAssetId: segment.audioAssetId ? assetIdMap.get(segment.audioAssetId) : undefined,
   }));
+  importedProject.dubbingMediaAssetId = importedProject.dubbingMediaAssetId
+    ? assetIdMap.get(importedProject.dubbingMediaAssetId)
+    : undefined;
   await saveProject(importedProject);
   setActiveProject(importedProject.id);
   return importedProject;

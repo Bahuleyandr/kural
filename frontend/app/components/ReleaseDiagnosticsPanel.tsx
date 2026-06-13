@@ -1,11 +1,27 @@
 import { useEffect, useState } from "react";
 
 import {
+  apiFetch,
   getDesktopDiagnostics,
   openLocalLogs,
+  readApiError,
   restartLocalBackend,
   type DesktopDiagnostics,
 } from "../lib/api";
+
+interface RuntimeCheck {
+  id: string;
+  label: string;
+  status: "ready" | "warning" | "missing" | "error";
+  detail: string;
+  repair_action?: string | null;
+}
+
+interface RuntimeHealthChecksResponse {
+  status: "ready" | "needs_setup" | "error";
+  checks: RuntimeCheck[];
+  storage: Record<string, string | number | boolean>;
+}
 
 export function ReleaseDiagnosticsPanel(props: {
   apiUrl: string;
@@ -13,6 +29,7 @@ export function ReleaseDiagnosticsPanel(props: {
   backendError: string | null;
 }) {
   const [diagnostics, setDiagnostics] = useState<DesktopDiagnostics | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeHealthChecksResponse | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
@@ -20,6 +37,8 @@ export function ReleaseDiagnosticsPanel(props: {
   async function refreshDiagnostics() {
     try {
       setDiagnostics(await getDesktopDiagnostics());
+      const res = await apiFetch(`${props.apiUrl}/api/runtime/health-checks`);
+      if (res.ok) setRuntime((await res.json()) as RuntimeHealthChecksResponse);
       setError("");
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Desktop diagnostics unavailable.");
@@ -37,10 +56,18 @@ export function ReleaseDiagnosticsPanel(props: {
           setError(exc instanceof Error ? exc.message : "Desktop diagnostics unavailable.");
         }
       });
+    void apiFetch(`${props.apiUrl}/api/runtime/health-checks`)
+      .then(async (res) => {
+        if (!cancelled && res.ok) setRuntime((await res.json()) as RuntimeHealthChecksResponse);
+        if (!cancelled && !res.ok) setError(await readApiError(res));
+      })
+      .catch((exc) => {
+        if (!cancelled) setError(exc instanceof Error ? exc.message : "Runtime checks unavailable.");
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [props.apiUrl]);
 
   async function restartEngine() {
     setBusy("restart");
@@ -143,6 +170,39 @@ export function ReleaseDiagnosticsPanel(props: {
           {busy === "logs" ? "Opening..." : "Open Logs Folder"}
         </button>
       </div>
+      {runtime && (
+        <section className="mt-4 rounded border border-slate-200 bg-slate-50 p-3" aria-label="Runtime health checks">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-medium">Runtime Health</h3>
+            <span className="rounded border border-slate-200 bg-white px-2 py-1 text-xs">
+              {runtime.status.replace("_", " ")}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {runtime.checks.map((check) => (
+              <div key={check.id} className="rounded border border-slate-200 bg-white p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{check.label}</span>
+                  <span
+                    className={`rounded border px-2 py-1 text-xs ${
+                      check.status === "ready"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-amber-200 bg-amber-50 text-amber-800"
+                    }`}
+                  >
+                    {check.status}
+                  </span>
+                </div>
+                <p className="mt-1 break-all text-xs text-slate-600">{check.detail}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 break-all text-xs text-slate-600">
+            Model root: {String(runtime.storage.model_pack_root || "unknown")} / sampled{" "}
+            {String(runtime.storage.model_files_sampled || 0)} files
+          </p>
+        </section>
+      )}
       <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
         Keep signed installers, updater keys, and model cache layout aligned before public release.
         This panel gives support a quick local runtime snapshot without exposing generated audio.

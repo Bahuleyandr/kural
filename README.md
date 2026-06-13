@@ -158,6 +158,8 @@ kural-mcp   # runs over stdio; expects the backend on KURAL_HOST
 | DELETE | `/api/voices/clones/{id}` | Delete a cloned voice |
 | GET | `/api/local-models` | Inspect optional local ASR/translation adapters |
 | GET | `/api/model-packs` | Inspect installable/removable local model packs and recent jobs |
+| POST | `/api/model-packs/benchmarks/run` | Rank local model candidates for a language/use case |
+| POST | `/api/marketplace/validate` | Validate a consent-first community voice/model manifest |
 | POST | `/api/model-packs/{id}/install` | Queue a safe backend-defined model-pack install |
 | POST | `/api/model-packs/{id}/update` | Queue a safe backend-defined model-pack update |
 | DELETE | `/api/model-packs/{id}` | Queue removal of a Kural-managed model-pack folder |
@@ -167,6 +169,9 @@ kural-mcp   # runs over stdio; expects the backend on KURAL_HOST
 | POST | `/api/align` | Align rendered segment audio for overrun checks and subtitle timing |
 | WS | `/api/transcribe/stream` | Incremental speech-to-text over WebSocket (Vosk-backed; powers the dictation widget) |
 | POST | `/api/translate` | Translate local script text with installed packages |
+| GET | `/api/runtime/health-checks` | Inspect local model, clone, ffmpeg, and lip-sync readiness |
+| GET | `/api/lip-sync/status` | Check optional local lip-sync runtime configuration |
+| POST | `/api/provenance/sidecar` | Build synthetic-audio provenance sidecar JSON |
 | GET | `/api/health` | Health check (also exposed at `/healthz` for Docker) |
 
 Voice clone samples must be WAV/MP3 audio, 5-30 seconds long, no larger than 25 MB, and submitted with explicit consent confirmation. Each accepted upload appends a JSON record to `CONSENT_LOG_PATH` (`~/.cache/kural/consent.log` by default) capturing the voice ID, sample SHA-256, requesting IP, and the consent statement that was in effect.
@@ -187,13 +192,14 @@ The workstation tabs are organised around day-to-day creator workflows:
 
 - **Write:** single, batch, SSML, performance style, and advanced audio controls.
 - **Quality:** A/B render the same line across styles, inspect waveform/loudness cues, get naturalness coaching, and reuse the best settings.
-- **Voices:** engine inventory, Clone Studio readiness scoring, guided recording scripts, cloned voices, readiness-report export, and voice import/export.
-- **Models:** local pack readiness, recommended-pack filtering, manifest trust metadata, quality/routing hints, and safe backend install/update/remove jobs for Kokoro, Supertonic, Chatterbox, Faster-Whisper, Vosk, Argos, IndicTrans2, and NLLB slots.
-- **Dubbing:** subtitle/audio imports, speaker-track voice assignment, timeline overview, local translation, split/merge segment editing, per-segment render, alignment checks, render-plan/MP4 mux-script export, transcript export, overrun warnings, and stitched WAV export.
+- **Voices:** engine inventory, Clone Studio readiness scoring, Pro Clone Pack guided lines, room-tone/consent fields, cloned voices, readiness-report export, and voice import/export.
+- **Models:** local pack readiness, recommended-pack filtering, runnable benchmark ranking, community manifest validation, manifest trust metadata, quality/routing hints, and safe backend install/update/remove jobs for Kokoro, Supertonic, Chatterbox, Faster-Whisper, Vosk, Argos, IndicTrans2, and NLLB slots.
+- **Dubbing:** subtitle/audio/video imports, source media preview, waveform-style timeline, word-level transcript editing, speaker-track voice assignment, local translation, split/merge segment editing, per-segment render, retiming, lip-sync readiness, alignment checks, render-plan/MP4 mux-script export, transcript export, overrun warnings, and stitched WAV export.
 - **Pronunciation:** ordered language-aware pronunciation rules with preview render plus JSON profile import/export.
-- **Script:** SSML chips, find/replace, version history, script diagnostics, and punctuation cleanup.
+- **Script:** SSML chips, find/replace, filler-word detection, version history, selected-line generation, caption export, script diagnostics, and punctuation cleanup.
+- **Agent:** mic STT loop, deterministic local planning, optional Ollama, auto-speak TTS, and interruption.
 - **Library:** local generated clips.
-- **Settings:** project vault snapshots, dictation controls, desktop diagnostics with repair actions, privacy/safety posture, and exportable consent ledger.
+- **Settings:** project vault snapshots, dictation controls, desktop diagnostics with runtime health checks, privacy/safety posture, voice-use audit, and exportable consent ledger.
 
 ## Developer commands
 
