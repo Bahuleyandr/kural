@@ -44,6 +44,29 @@ Optional flags forwarded straight through to `build_desktop.py`:
 Unsigned Windows installers will trigger SmartScreen warnings; macOS
 unsigned bundles will be Gatekeeper-blocked. Sign them.
 
+## Public Beta RC1 Local Gate
+
+Before tagging a public beta candidate, run the local release gate. The fast
+gate is suitable before each RC commit:
+
+```powershell
+.\scripts\rc1-release-gate.ps1
+```
+
+Run the full gate before an installer handoff:
+
+```powershell
+.\scripts\rc1-release-gate.ps1 -IncludePlaywright -IncludeDocker
+```
+
+Cross-platform equivalent:
+
+```bash
+python scripts/rc1_release_gate.py --include-playwright --include-docker
+```
+
+See `docs/BETA_RC1.md` for the dogfood checklist and pass/fail criteria.
+
 ## Updater Signing
 
 Tauri's auto-updater uses a separate Ed25519 keypair from OS code-signing.

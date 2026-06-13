@@ -211,7 +211,7 @@ make frontend-build
 make docker-build
 ```
 
-See `docs/API.md` for API examples, `docs/ROADMAP.md` for the staged product plan, and `docs/RELEASE.md` for desktop release steps.
+See `docs/API.md` for API examples, `docs/ROADMAP.md` for the staged product plan, `docs/BETA_RC1.md` for the public beta dogfood gate, and `docs/RELEASE.md` for desktop release steps.
 
 ## License
 

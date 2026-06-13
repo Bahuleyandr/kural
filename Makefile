@@ -1,4 +1,4 @@
-.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test mcp-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check test
+.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test mcp-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check rc1-gate rc1-gate-full test
 
 backend-test:
 	cd backend && python -m pytest
@@ -56,5 +56,11 @@ desktop-release-check:
 	printf signature > /tmp/kural-artifacts/Kural.AppImage.sig
 	printf '{"version":"0.2.0"}' > /tmp/kural-artifacts/latest.json
 	python desktop/scripts/smoke-release-artifacts.py --bundle-dir /tmp/kural-artifacts --require-signatures
+
+rc1-gate:
+	python scripts/rc1_release_gate.py
+
+rc1-gate-full:
+	python scripts/rc1_release_gate.py --include-playwright --include-docker
 
 test: backend-test cli-test mcp-test frontend-lint frontend-unit frontend-build

@@ -199,12 +199,15 @@ curl -X POST http://localhost:8000/api/agent/respond \
 
 ```bash
 curl http://localhost:8000/api/runtime/health-checks
+curl -X POST http://localhost:8000/api/runtime/repair \
+  -H "Content-Type: application/json" \
+  -d '{"action":"create_clone_folder"}'
 curl -X POST http://localhost:8000/api/provenance/sidecar \
   -H "Content-Type: application/json" \
   -d '{"project_id":"p1","asset_name":"clip.wav","voice_label":"Bella"}'
 ```
 
-`/api/runtime/health-checks` reports Kokoro model files, clone storage, ffmpeg, lip-sync configuration, and sampled model-cache storage. `/api/provenance/sidecar` creates the synthetic-audio sidecar shape used by exports.
+`/api/runtime/health-checks` reports Kokoro model files, clone storage, ffmpeg, lip-sync configuration, and sampled model-cache storage. `/api/runtime/repair` accepts only backend-defined safe actions: `create_clone_folder` and `provision_kokoro` can run locally; `install_ffmpeg` and `configure_lip_sync_binary` return structured manual-setup errors. `/api/provenance/sidecar` creates the synthetic-audio sidecar shape used by exports.
 
 ## Local Project Archives
 

@@ -30,6 +30,51 @@ def test_lip_sync_status_reports_unconfigured(monkeypatch):
     assert payload["safe_action"] == "configure_lip_sync_binary"
 
 
+def test_runtime_repair_creates_clone_storage(tmp_path, monkeypatch):
+    clone_root = tmp_path / "clones"
+    monkeypatch.setattr(settings, "clone_cache_dir", str(clone_root))
+    monkeypatch.setattr(settings, "model_pack_root", str(tmp_path / "models"))
+    monkeypatch.setattr(settings, "model_cache_dir", str(tmp_path / "kokoro"))
+
+    res = TestClient(app).post(
+        "/api/runtime/repair",
+        json={"action": "create_clone_folder"},
+    )
+
+    assert res.status_code == 202
+    payload = res.json()
+    assert payload["status"] == "complete"
+    assert clone_root.exists()
+    clone_check = next(check for check in payload["runtime"]["checks"] if check["id"] == "clone-storage")
+    assert clone_check["status"] == "ready"
+    assert clone_check["repair_action"] is None
+
+
+def test_runtime_repair_rejects_manual_ffmpeg_install():
+    res = TestClient(app).post(
+        "/api/runtime/repair",
+        json={"action": "install_ffmpeg"},
+    )
+
+    assert res.status_code == 409
+    payload = res.json()
+    assert payload["detail"]["code"] == "manual_repair_required"
+    assert "trusted source" in payload["detail"]["message"]
+
+
+def test_runtime_repair_rejects_unsafe_clone_storage(monkeypatch):
+    monkeypatch.setattr(settings, "clone_cache_dir", "/")
+
+    res = TestClient(app).post(
+        "/api/runtime/repair",
+        json={"action": "create_clone_folder"},
+    )
+
+    assert res.status_code == 400
+    payload = res.json()
+    assert payload["detail"]["code"] == "unsafe_repair_path"
+
+
 def test_provenance_sidecar_shape():
     res = TestClient(app).post(
         "/api/provenance/sidecar",

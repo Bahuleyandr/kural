@@ -23,6 +23,21 @@ interface RuntimeHealthChecksResponse {
   storage: Record<string, string | number | boolean>;
 }
 
+interface RuntimeRepairResponse {
+  action: string;
+  status: "complete" | "started" | "manual";
+  message: string;
+  runtime: RuntimeHealthChecksResponse;
+}
+
+const REPAIRABLE_ACTIONS = new Set(["create_clone_folder", "provision_kokoro"]);
+
+function repairLabel(action: string) {
+  if (action === "create_clone_folder") return "Create Folder";
+  if (action === "provision_kokoro") return "Install Models";
+  return "Manual Setup";
+}
+
 export function ReleaseDiagnosticsPanel(props: {
   apiUrl: string;
   backendStatus: string | null;
@@ -97,6 +112,27 @@ export function ReleaseDiagnosticsPanel(props: {
       setMessage(opened ? "Opened local logs folder." : "Logs folder is available only in the desktop app.");
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not open the logs folder.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function repairRuntime(action: string) {
+    setBusy(action);
+    setMessage("");
+    setError("");
+    try {
+      const res = await apiFetch(`${props.apiUrl}/api/runtime/repair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const payload = (await res.json()) as RuntimeRepairResponse;
+      setRuntime(payload.runtime);
+      setMessage(payload.message);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not repair the local runtime.");
     } finally {
       setBusy("");
     }
@@ -194,6 +230,24 @@ export function ReleaseDiagnosticsPanel(props: {
                   </span>
                 </div>
                 <p className="mt-1 break-all text-xs text-slate-600">{check.detail}</p>
+                {check.repair_action && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {REPAIRABLE_ACTIONS.has(check.repair_action) ? (
+                      <button
+                        type="button"
+                        className="rounded border border-slate-300 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+                        disabled={Boolean(busy)}
+                        onClick={() => void repairRuntime(check.repair_action as string)}
+                      >
+                        {busy === check.repair_action ? "Working..." : repairLabel(check.repair_action)}
+                      </button>
+                    ) : (
+                      <span className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                        {repairLabel(check.repair_action)}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

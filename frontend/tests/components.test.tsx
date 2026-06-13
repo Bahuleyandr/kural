@@ -9,6 +9,7 @@ import { FirstRunWizard } from "../app/components/FirstRunWizard";
 import { LocalModelPanel } from "../app/components/LocalModelPanel";
 import { ModelPackManager } from "../app/components/ModelPackManager";
 import { QualityStudio } from "../app/components/QualityStudio";
+import { ReleaseDiagnosticsPanel } from "../app/components/ReleaseDiagnosticsPanel";
 import { SettingsView } from "../app/components/SettingsView";
 import { ScriptStudio } from "../app/components/ScriptStudio";
 import { TtsEnginePanel } from "../app/components/TtsEnginePanel";
@@ -455,6 +456,86 @@ describe("SettingsView", () => {
       screen.getByRole("heading", { name: /desktop release diagnostics/i })
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /privacy and safety/i })).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("ReleaseDiagnosticsPanel", () => {
+  it("repairs clone storage through the safe runtime action endpoint", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/runtime/health-checks")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "needs_setup",
+              checks: [
+                {
+                  id: "clone-storage",
+                  label: "Voice clone storage",
+                  status: "warning",
+                  detail: "/tmp/kural/clones",
+                  repair_action: "create_clone_folder",
+                },
+                {
+                  id: "ffmpeg",
+                  label: "ffmpeg mux/export",
+                  status: "missing",
+                  detail: "ffmpeg not found on PATH",
+                  repair_action: "install_ffmpeg",
+                },
+              ],
+              storage: { model_pack_root: "/models", model_files_sampled: 0 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+        );
+      }
+      if (url.endsWith("/api/runtime/repair") && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              action: "create_clone_folder",
+              status: "complete",
+              message: "Created local voice clone storage.",
+              runtime: {
+                status: "ready",
+                checks: [
+                  {
+                    id: "clone-storage",
+                    label: "Voice clone storage",
+                    status: "ready",
+                    detail: "/tmp/kural/clones",
+                    repair_action: null,
+                  },
+                ],
+                storage: { model_pack_root: "/models", model_files_sampled: 0 },
+              },
+            }),
+            { status: 202, headers: { "Content-Type": "application/json" } }
+          )
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReleaseDiagnosticsPanel apiUrl="http://backend" backendStatus={null} backendError={null} />);
+    expect(await screen.findByRole("button", { name: /create folder/i })).toBeInTheDocument();
+    expect(screen.getByText(/manual setup/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /create folder/i }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend/api/runtime/repair",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "create_clone_folder" }),
+      })
+    );
+    expect(await screen.findByText(/created local voice clone storage/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /create folder/i })).not.toBeInTheDocument();
     vi.unstubAllGlobals();
   });
 });

@@ -4,7 +4,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from ..config import settings
 from ..models import (
@@ -13,6 +13,8 @@ from ..models import (
     ProvenanceSidecarResponse,
     RuntimeCheck,
     RuntimeHealthChecksResponse,
+    RuntimeRepairRequest,
+    RuntimeRepairResponse,
 )
 
 router = APIRouter(tags=["runtime"])
@@ -42,6 +44,19 @@ def _dir_size(path: Path, max_files: int = 2000) -> tuple[int, int]:
             except OSError:
                 continue
     return total, count
+
+
+def _assert_repair_path(path: Path, label: str) -> Path:
+    resolved = path.expanduser().resolve()
+    if resolved == resolved.parent:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "unsafe_repair_path",
+                "message": f"{label} points at a filesystem root and will not be modified.",
+            },
+        )
+    return resolved
 
 
 @router.get("/runtime/health-checks", response_model=RuntimeHealthChecksResponse)
@@ -92,6 +107,51 @@ async def runtime_health_checks() -> RuntimeHealthChecksResponse:
             "model_bytes_sampled": storage_bytes,
             "model_files_sampled": storage_files,
             "ffmpeg_available": bool(ffmpeg),
+        },
+    )
+
+
+@router.post("/runtime/repair", response_model=RuntimeRepairResponse, status_code=202)
+async def repair_runtime(req: RuntimeRepairRequest) -> RuntimeRepairResponse:
+    if req.action == "create_clone_folder":
+        clone_root = _assert_repair_path(_expand(settings.clone_cache_dir), "Clone storage")
+        clone_root.mkdir(parents=True, exist_ok=True)
+        return RuntimeRepairResponse(
+            action=req.action,
+            status="complete",
+            message=f"Created local voice clone storage at {clone_root}.",
+            runtime=await runtime_health_checks(),
+        )
+
+    if req.action == "provision_kokoro":
+        from .setup import provision_models
+
+        setup_status = await provision_models()
+        return RuntimeRepairResponse(
+            action=req.action,
+            status="complete" if setup_status.kokoro_ready else "started",
+            message=(
+                "Kokoro model files are ready."
+                if setup_status.kokoro_ready
+                else f"Started Kokoro model provisioning in {setup_status.model_dir}."
+            ),
+            runtime=await runtime_health_checks(),
+        )
+
+    if req.action == "install_ffmpeg":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "manual_repair_required",
+                "message": "Install ffmpeg from a trusted source, then restart Kural so the local engine can find it on PATH.",
+            },
+        )
+
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "manual_repair_required",
+            "message": "Configure KURAL_LIP_SYNC_BINARY to a vetted local lip-sync binary, then restart Kural.",
         },
     )
 

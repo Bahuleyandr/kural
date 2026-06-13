@@ -188,6 +188,22 @@ class RuntimeHealthChecksResponse(BaseModel):
     storage: dict[str, str | int | bool]
 
 
+class RuntimeRepairRequest(BaseModel):
+    action: Literal[
+        "provision_kokoro",
+        "create_clone_folder",
+        "install_ffmpeg",
+        "configure_lip_sync_binary",
+    ]
+
+
+class RuntimeRepairResponse(BaseModel):
+    action: str
+    status: Literal["complete", "started", "manual"]
+    message: str
+    runtime: RuntimeHealthChecksResponse
+
+
 class LipSyncStatusResponse(BaseModel):
     available: bool
     provider: str = "none"
