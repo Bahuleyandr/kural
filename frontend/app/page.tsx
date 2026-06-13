@@ -1018,6 +1018,44 @@ export default function Home() {
     });
   }
 
+  function applySpeakerVoice(speaker: string, voiceId: string) {
+    if (!activeProject) return;
+    persistProject({
+      ...activeProject,
+      dubbingSegments: activeProject.dubbingSegments.map((segment) =>
+        (segment.speaker || "Speaker 1") === speaker
+          ? {
+              ...segment,
+              voiceId,
+              audioAssetId: undefined,
+              alignment: undefined,
+              status: "draft",
+              notes: `${segment.notes ? `${segment.notes}; ` : ""}Speaker voice updated`,
+            }
+          : segment
+      ),
+    });
+  }
+
+  function applySpeakerSpeed(speaker: string, speed: number) {
+    if (!activeProject) return;
+    const nextSpeed = Math.min(2, Math.max(0.5, Number.isFinite(speed) ? speed : 1));
+    persistProject({
+      ...activeProject,
+      dubbingSegments: activeProject.dubbingSegments.map((segment) =>
+        (segment.speaker || "Speaker 1") === speaker
+          ? {
+              ...segment,
+              controls: { ...segment.controls, speed: Number(nextSpeed.toFixed(2)) },
+              audioAssetId: undefined,
+              alignment: undefined,
+              status: "draft",
+            }
+          : segment
+      ),
+    });
+  }
+
   async function renderSegment(segment: DubbingSegment) {
     if (!activeProject) return;
     updateSegment(segment.id, { status: "rendering", error: undefined });
@@ -1228,6 +1266,33 @@ export default function Home() {
       ),
       `${activeProject.name || "kural"}-render-plan.json`
     );
+  }
+
+  function exportDubbingMuxScript() {
+    if (!activeProject) return;
+    const projectSlug = (activeProject.name || "kural")
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "kural";
+    const script = [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "",
+      "# Kural Dubbing Pro mux helper",
+      "# 1. Export the WAV timeline from Kural as kural-dubbing.wav",
+      "# 2. Put the original media next to this script as original.mp4",
+      "# 3. Run: bash ./kural-mux.sh",
+      "",
+      'ORIGINAL="${1:-original.mp4}"',
+      `DUBBED_WAV="\${2:-${projectSlug}-dubbing.wav}"`,
+      `OUTPUT="\${3:-${projectSlug}-dubbed.mp4}"`,
+      "",
+      'ffmpeg -y -i "$ORIGINAL" -i "$DUBBED_WAV" \\',
+      '  -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k -shortest "$OUTPUT"',
+      "",
+      `echo "Wrote $OUTPUT"`,
+    ].join("\n");
+    downloadBlob(new Blob([script], { type: "text/x-shellscript" }), `${projectSlug}-mux.sh`);
   }
 
   async function exportActiveProject() {
@@ -1842,9 +1907,12 @@ export default function Home() {
                   onExportTranscript={exportDubbingTranscript}
                   onAlignSegment={(segment) => void alignSegment(segment)}
                   onApplySuggestedSpeed={applySuggestedSegmentSpeed}
+                  onApplySpeakerSpeed={applySpeakerSpeed}
+                  onApplySpeakerVoice={applySpeakerVoice}
                   onImportMedia={transcribeMediaFile}
                   onImportTranscript={importTranscriptFile}
                   onMergeWithNext={mergeSegmentWithNext}
+                  onExportMuxScript={exportDubbingMuxScript}
                   onRenderAll={() => void renderAllSegments()}
                   onRenderSegment={(segment) => void renderSegment(segment)}
                   onRetryFailed={() => void retryFailedSegments()}

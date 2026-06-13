@@ -14,6 +14,7 @@ running Kural backend over HTTP and never loads TTS/ASR models itself.
 | `list_voices` | List Kokoro and Supertonic voices, filterable by engine or language |
 | `list_cloned_voices` | List cloned voices saved in the backend |
 | `list_model_packs` | Read-only model-pack inventory with optional category filtering |
+| `agent_capabilities` | Read-only local agent profile for routing TTS/ASR/translation workflows |
 | `inspect_project_archive` | Safely inspect a local `.kuralproj` manifest without extracting files |
 | `synthesize` | Synthesize text to a WAV/MP3 file with a built-in voice |
 | `synthesize_with_cloned_voice` | Synthesize text using an existing cloned voice |
@@ -28,6 +29,11 @@ inventory but cannot install or remove packs.
 Project archive inspection is also read-only. It validates archive paths
 before reading `manifest.json` and returns counts for documents, audio
 assets, pronunciation profiles, voice presets, and dubbing segments.
+
+`agent_capabilities` is the recommended first call for voice-agent clients.
+It reports whether local TTS, cloned-voice use, ASR, translation, and project
+archive inspection are available, while keeping clone creation and model
+installation human-gated.
 
 ## Installation
 

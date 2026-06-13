@@ -132,3 +132,39 @@ def test_projects_inspect_summarizes_kuralproj(tmp_path):
     assert payload["project_name"] == "Launch read"
     assert payload["audio_assets"] == 1
     assert payload["dubbing_segments"] == 2
+
+
+def test_agent_profile_reports_local_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        cli_module,
+        "get_voices",
+        lambda host: [{"id": "af_bella"}],
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "list_clones",
+        lambda host: [{"id": "clone-1"}],
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "list_model_packs",
+        lambda host: {
+            "packs": [
+                {"id": "kokoro-v1-onnx", "category": "tts", "status": "ready"},
+                {"id": "faster-whisper", "category": "asr", "status": "ready"},
+            ],
+            "jobs": [],
+            "total": 2,
+        },
+    )
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["agent", "profile", "--host", "http://backend", "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["capabilities"]["tts"] is True
+    assert payload["capabilities"]["asr"] is True
+    assert payload["capabilities"]["voice_clone_create"] == "human-consent-required"

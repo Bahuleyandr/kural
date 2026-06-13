@@ -16,6 +16,8 @@ kural voices export voices.zip
 kural voices import voices.zip
 kural models                         # list local model packs and jobs
 kural models --category asr          # filter by tts/asr/translation
+kural agent profile                  # local agent capability profile
+kural agent profile --json
 kural projects inspect demo.kuralproj
 kural projects inspect demo.kuralproj --json
 kural speak "Hello" --voice-id <clone-id>
@@ -24,6 +26,10 @@ kural speak "Hello" --voice-id <clone-id>
 `projects inspect` reads only `manifest.json` and validates archive member
 paths before reporting document, audio asset, pronunciation profile, voice
 preset, and dubbing segment counts. It does not extract project files.
+
+`agent profile` is read-only and consent-safe. It reports available voices,
+cloned voices, ready local model categories, and recommended agent tools
+without creating clones or installing model packs.
 
 ## Installation
 

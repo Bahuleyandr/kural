@@ -69,6 +69,9 @@ export interface ModelPackInfo {
   trust_level?: "built_in" | "verified_manifest" | "user_supplied" | "external_runtime";
   manifest_digest?: string | null;
   recommended?: boolean;
+  quality_score?: number;
+  latency_tier?: "realtime" | "interactive" | "batch" | "manual";
+  routing_hints?: string[];
   detail?: string | null;
   actions: ModelPackAction[];
 }

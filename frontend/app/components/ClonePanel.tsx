@@ -4,8 +4,23 @@ import type { ClonedVoiceInfo } from "../lib/types";
 
 const CLONE_MIN_SECONDS = 5;
 const CLONE_MAX_SECONDS = 30;
-const CLONE_READING_PROMPT =
-  "Hi, this is my Kural voice sample. I am speaking clearly at a natural pace, with steady volume and a quiet room. Today I will read a few short sentences, count from one to ten, and pause briefly between ideas so the app can learn my voice without background noise.";
+const CLONE_PROMPTS = [
+  {
+    id: "neutral",
+    label: "Neutral proof",
+    text: "Hi, this is my Kural voice sample. I am speaking clearly at a natural pace, with steady volume and a quiet room. Today I will read a few short sentences, count from one to ten, and pause briefly between ideas so the app can learn my voice without background noise.",
+  },
+  {
+    id: "range",
+    label: "Expression range",
+    text: "This sample includes a calm sentence, a brighter sentence, and a slower closing line. I am keeping the same microphone distance while changing emotion gently, so Kural can hear my natural speaking range.",
+  },
+  {
+    id: "consent",
+    label: "Consent statement",
+    text: "I confirm that I own this voice or have permission to use it in Kural. This recording is for local voice cloning on this computer, and I understand that generated audio should be used responsibly.",
+  },
+];
 
 type ClonePanelTab = "upload" | "record";
 
@@ -18,8 +33,12 @@ interface SampleScore {
   duration: number;
   peak: number;
   rms: number;
+  clippedRatio: number;
+  silenceRatio: number;
+  noiseFloor: number;
   score: number;
   warnings: string[];
+  strengths: string[];
 }
 
 function formatSeconds(value: number): string {
@@ -79,8 +98,12 @@ async function scoreSample(file: File): Promise<SampleScore> {
       duration: 0,
       peak: 0,
       rms: 0,
+      clippedRatio: 0,
+      silenceRatio: 0,
+      noiseFloor: 0,
       score: 0,
       warnings: ["Audio analysis is not available in this browser."],
+      strengths: [],
     };
   }
   const context = new AudioContextCtor();
@@ -89,26 +112,45 @@ async function scoreSample(file: File): Promise<SampleScore> {
     const channel = buffer.getChannelData(0);
     let peak = 0;
     let sum = 0;
+    let clipped = 0;
+    let silent = 0;
+    let noiseSum = 0;
+    const noiseWindow = Math.min(channel.length, Math.floor(buffer.sampleRate * 0.5));
     for (let i = 0; i < channel.length; i += 1) {
       const value = Math.abs(channel[i]);
       peak = Math.max(peak, value);
       sum += value * value;
+      if (value > 0.98) clipped += 1;
+      if (value < 0.008) silent += 1;
+      if (i < noiseWindow) noiseSum += value * value;
     }
     const rms = Math.sqrt(sum / Math.max(1, channel.length));
+    const clippedRatio = clipped / Math.max(1, channel.length);
+    const silenceRatio = silent / Math.max(1, channel.length);
+    const noiseFloor = Math.sqrt(noiseSum / Math.max(1, noiseWindow));
     const warnings: string[] = [];
+    const strengths: string[] = [];
     if (buffer.duration < CLONE_MIN_SECONDS) warnings.push("Sample is shorter than 5 seconds.");
     if (buffer.duration > CLONE_MAX_SECONDS) warnings.push("Sample is longer than 30 seconds.");
     if (peak > 0.98) warnings.push("Possible clipping detected.");
     if (rms < 0.015) warnings.push("Recording level is very quiet.");
     if (rms > 0.35) warnings.push("Recording level is very loud.");
+    if (silenceRatio > 0.45) warnings.push("Too much silence detected; keep a steady read.");
+    if (noiseFloor > 0.04) warnings.push("Noise floor is high; try a quieter room or closer mic.");
+    if (buffer.duration >= 12 && buffer.duration <= 25) strengths.push("Duration is in the ideal range.");
+    if (peak >= 0.35 && peak <= 0.92) strengths.push("Peak level leaves useful headroom.");
+    if (rms >= 0.03 && rms <= 0.22) strengths.push("Average level is healthy for cloning.");
+    if (silenceRatio <= 0.3) strengths.push("Speech is present through most of the sample.");
     const score = Math.max(
       0,
       100 -
         warnings.length * 18 -
         (buffer.duration >= 12 && buffer.duration <= 25 ? 0 : 10) -
-        (peak > 0.98 ? 15 : 0)
+        (peak > 0.98 ? 15 : 0) -
+        (silenceRatio > 0.45 ? 10 : 0) -
+        (noiseFloor > 0.04 ? 10 : 0)
     );
-    return { duration: buffer.duration, peak, rms, score, warnings };
+    return { duration: buffer.duration, peak, rms, clippedRatio, silenceRatio, noiseFloor, score, warnings, strengths };
   } finally {
     await context.close();
   }
@@ -155,6 +197,7 @@ export function ClonePanel(props: {
   const [recorderMessage, setRecorderMessage] = useState("");
   const [sampleUrl, setSampleUrl] = useState("");
   const [sampleScore, setSampleScore] = useState<SampleScore | null>(null);
+  const [promptId, setPromptId] = useState(CLONE_PROMPTS[0].id);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -315,8 +358,12 @@ export function ClonePanel(props: {
             duration: 0,
             peak: 0,
             rms: 0,
+            clippedRatio: 0,
+            silenceRatio: 0,
+            noiseFloor: 0,
             score: 0,
             warnings: ["Could not analyze this sample."],
+            strengths: [],
           });
         }
       });
@@ -329,6 +376,39 @@ export function ClonePanel(props: {
   const selectedFileDetail = cloneFile
     ? `${cloneFile.name} (${Math.max(1, Math.round(cloneFile.size / 1024))} KB)`
     : "No sample selected";
+  const activePrompt = CLONE_PROMPTS.find((prompt) => prompt.id === promptId) || CLONE_PROMPTS[0];
+  const readinessLabel =
+    !sampleScore ? "No sample" : sampleScore.score >= 80 ? "Clone-ready" : sampleScore.score >= 55 ? "Needs cleanup" : "Retake recommended";
+
+  function downloadReadinessReport() {
+    if (!cloneFile || !sampleScore) return;
+    const report = {
+      schemaVersion: 1,
+      kind: "kural-clone-readiness-report",
+      createdAt: new Date().toISOString(),
+      file: {
+        name: cloneFile.name,
+        size: cloneFile.size,
+        type: cloneFile.type,
+      },
+      language: cloneLanguage,
+      requestedName: cloneName,
+      consentConfirmed: cloneConsent,
+      prompt: activePrompt,
+      score: sampleScore,
+      recommendation: readinessLabel,
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(report, null, 2)], { type: "application/json" })
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${cloneName.trim() || "kural-clone"}-readiness.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <section className="rounded border border-slate-300 p-3" aria-labelledby="clone-heading">
@@ -390,7 +470,21 @@ export function ClonePanel(props: {
               <div className="mb-1 text-xs font-medium uppercase text-slate-500">
                 Read this aloud
               </div>
-              <p>{CLONE_READING_PROMPT}</p>
+              <label className="mb-2 block text-xs font-medium text-slate-600">
+                Script
+                <select
+                  className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  value={promptId}
+                  onChange={(event) => setPromptId(event.target.value)}
+                >
+                  {CLONE_PROMPTS.map((prompt) => (
+                    <option key={prompt.id} value={prompt.id}>
+                      {prompt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p>{activePrompt.text}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -446,10 +540,10 @@ export function ClonePanel(props: {
                         : "border-red-200 bg-red-50 text-red-800"
                   }`}
                 >
-                  {sampleScore.score}/100
+                  {readinessLabel} / {sampleScore.score}/100
                 </span>
               </div>
-              <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600">
+              <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600 md:grid-cols-6">
                 <div>
                   <dt>Length</dt>
                   <dd>{formatSeconds(sampleScore.duration)}</dd>
@@ -462,7 +556,26 @@ export function ClonePanel(props: {
                   <dt>Level</dt>
                   <dd>{Math.round(sampleScore.rms * 100)}%</dd>
                 </div>
+                <div>
+                  <dt>Clipped</dt>
+                  <dd>{Math.round(sampleScore.clippedRatio * 1000) / 10}%</dd>
+                </div>
+                <div>
+                  <dt>Silence</dt>
+                  <dd>{Math.round(sampleScore.silenceRatio * 100)}%</dd>
+                </div>
+                <div>
+                  <dt>Noise floor</dt>
+                  <dd>{Math.round(sampleScore.noiseFloor * 100)}%</dd>
+                </div>
               </dl>
+              {sampleScore.strengths.length > 0 && (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-emerald-800">
+                  {sampleScore.strengths.map((strength) => (
+                    <li key={strength}>{strength}</li>
+                  ))}
+                </ul>
+              )}
               {sampleScore.warnings.length > 0 && (
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-700">
                   {sampleScore.warnings.map((warning) => (
@@ -470,6 +583,13 @@ export function ClonePanel(props: {
                   ))}
                 </ul>
               )}
+              <button
+                type="button"
+                className="mt-3 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400"
+                onClick={downloadReadinessReport}
+              >
+                Export Readiness Report
+              </button>
             </div>
           )}
         </div>

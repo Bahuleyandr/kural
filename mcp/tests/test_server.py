@@ -40,7 +40,7 @@ class _FakeClient:
         return {
             "packs": [
                 {"id": "kokoro-v1-onnx", "category": "tts", "status": "ready"},
-                {"id": "faster-whisper", "category": "asr", "status": "not_configured"},
+                {"id": "faster-whisper", "category": "asr", "status": "ready"},
             ],
             "jobs": [{"id": "job-1", "kind": "model-pack:install:kokoro-v1-onnx"}],
             "total": 2,
@@ -99,6 +99,16 @@ def test_list_model_packs_filters_by_category(fake):
 def test_list_model_packs_rejects_unknown_category(fake):
     with pytest.raises(KuralBackendError, match="Unsupported category"):
         server.list_model_packs(category="agents")
+
+
+def test_agent_capabilities_reports_safe_profile(fake):
+    profile = server.agent_capabilities()
+
+    assert profile["voice_count"] == 3
+    assert profile["clone_count"] == 1
+    assert profile["capabilities"]["tts"] is True
+    assert profile["capabilities"]["asr"] is True
+    assert profile["capabilities"]["voice_clone_create"] == "human-consent-required"
 
 
 def test_inspect_project_archive_summarizes_manifest(fake, tmp_path):

@@ -158,6 +158,46 @@ def list_model_packs(category: str = "", include_jobs: bool = True) -> dict:
 
 
 @mcp.tool()
+def agent_capabilities() -> dict:
+    """Return a consent-safe profile of local Kural agent capabilities.
+
+    This tool is read-only. It advertises usable local workflows for MCP
+    agents while keeping voice-clone creation and model installation as
+    deliberate human actions in the app/backend.
+    """
+    voices = _client.get_voices()
+    clones = _client.list_clones()
+    payload = _client.list_model_packs()
+    packs = payload.get("packs", [])
+    ready_packs = [pack for pack in packs if pack.get("status") == "ready"]
+    ready_categories = sorted({pack.get("category", "") for pack in ready_packs if pack.get("category")})
+    return {
+        "schema_version": 1,
+        "kind": "kural-local-agent-profile",
+        "voice_count": len(voices),
+        "clone_count": len(clones),
+        "ready_model_categories": ready_categories,
+        "capabilities": {
+            "tts": bool(voices),
+            "voice_clone_use": bool(clones),
+            "voice_clone_create": "human-consent-required",
+            "asr": "asr" in ready_categories,
+            "translation": "translation" in ready_categories,
+            "project_archive_inspection": True,
+            "model_install": "human-confirmation-required",
+        },
+        "recommended_tools": [
+            "list_voices",
+            "list_cloned_voices",
+            "list_model_packs",
+            "synthesize",
+            "transcribe",
+            "inspect_project_archive",
+        ],
+    }
+
+
+@mcp.tool()
 def inspect_project_archive(archive_path: str) -> dict:
     """Inspect a local .kuralproj archive without extracting it.
 

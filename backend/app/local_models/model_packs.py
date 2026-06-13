@@ -40,6 +40,9 @@ class ModelPackManifest:
     non_commercial: bool = False
     trust_level: str = "built_in"
     recommended: bool = False
+    quality_score: int = 0
+    latency_tier: str = "manual"
+    routing_hints: tuple[str, ...] = ()
 
 
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -119,6 +122,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             capabilities=["tts", "ssml", "wav", "mp3", "advanced-controls"],
             install_kind="download-kokoro",
             recommended=True,
+            quality_score=82,
+            latency_tier="interactive",
+            routing_hints=("default-tts", "long-form", "offline-english"),
         ),
         ModelPackManifest(
             id="supertonic-3-onnx",
@@ -136,6 +142,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             install_kind="download-supertonic",
             requires_confirmation=True,
             recommended=True,
+            quality_score=86,
+            latency_tier="interactive",
+            routing_hints=("multilingual-tts", "scripted-dubbing", "style-controls"),
         ),
         ModelPackManifest(
             id="chatterbox-local",
@@ -154,6 +163,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             requires_confirmation=True,
             trust_level="external_runtime",
             recommended=True,
+            quality_score=78,
+            latency_tier="batch",
+            routing_hints=("voice-clone", "consent-required", "wav-only"),
         ),
         ModelPackManifest(
             id="faster-whisper",
@@ -171,6 +183,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             install_kind="provision-faster-whisper",
             requires_confirmation=True,
             recommended=True,
+            quality_score=84,
+            latency_tier="batch",
+            routing_hints=("media-transcription", "dubbing-import", "speaker-workflow"),
         ),
         ModelPackManifest(
             id="vosk",
@@ -187,6 +202,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             capabilities=["transcribe", "cpu", "small-models"],
             install_kind="manual-runtime",
             trust_level="user_supplied",
+            quality_score=70,
+            latency_tier="realtime",
+            routing_hints=("dictation", "low-resource", "streaming-asr"),
         ),
         ModelPackManifest(
             id="argos-translate",
@@ -204,6 +222,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             install_kind="provision-argos",
             requires_confirmation=True,
             recommended=True,
+            quality_score=72,
+            latency_tier="interactive",
+            routing_hints=("offline-translation", "glossary-assisted", "lightweight"),
         ),
         ModelPackManifest(
             id="indictrans2",
@@ -221,6 +242,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             install_kind="manual-runtime",
             requires_confirmation=True,
             trust_level="user_supplied",
+            quality_score=80,
+            latency_tier="batch",
+            routing_hints=("indic-translation", "dubbing-localization", "large-model"),
         ),
         ModelPackManifest(
             id="nllb-200",
@@ -239,6 +263,9 @@ def builtin_model_pack_manifests() -> list[ModelPackManifest]:
             requires_confirmation=True,
             non_commercial=True,
             trust_level="user_supplied",
+            quality_score=76,
+            latency_tier="batch",
+            routing_hints=("many-languages", "research-license", "large-model"),
         ),
     ]
 
@@ -298,6 +325,9 @@ def list_model_packs() -> list[ModelPackInfo]:
                 trust_level=manifest.trust_level,  # type: ignore[arg-type]
                 manifest_digest=_manifest_digest(manifest),
                 recommended=manifest.recommended,
+                quality_score=manifest.quality_score,
+                latency_tier=manifest.latency_tier,  # type: ignore[arg-type]
+                routing_hints=list(manifest.routing_hints),
                 detail=current.get("detail"),
                 actions=actions,
             )

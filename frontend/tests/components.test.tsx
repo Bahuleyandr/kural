@@ -138,6 +138,9 @@ describe("ModelPackManager", () => {
                   trust_level: "built_in",
                   manifest_digest: "sha256:kma",
                   recommended: true,
+                  quality_score: 82,
+                  latency_tier: "interactive",
+                  routing_hints: ["default-tts", "long-form"],
                   detail: null,
                   actions: ["install"],
                 },
@@ -160,6 +163,9 @@ describe("ModelPackManager", () => {
                   trust_level: "verified_manifest",
                   manifest_digest: "sha256:fw",
                   recommended: true,
+                  quality_score: 84,
+                  latency_tier: "batch",
+                  routing_hints: ["media-transcription"],
                   detail: null,
                   actions: ["install"],
                 },
@@ -182,6 +188,9 @@ describe("ModelPackManager", () => {
                   trust_level: "verified_manifest",
                   manifest_digest: "sha256:argos",
                   recommended: true,
+                  quality_score: 72,
+                  latency_tier: "interactive",
+                  routing_hints: ["offline-translation"],
                   detail: null,
                   actions: ["install"],
                 },
@@ -242,10 +251,14 @@ describe("ModelPackManager", () => {
     );
     expect(screen.getByRole("heading", { name: /model pack manager/i })).toBeInTheDocument();
     expect(await screen.findByText(/tts packs/i)).toBeInTheDocument();
-    const kokoroCard = screen.getByText("Kokoro v1.0 ONNX").closest("article");
+    expect(screen.getByRole("heading", { name: /local quality router/i })).toBeInTheDocument();
+    const kokoroCard = screen.getAllByText("Kokoro v1.0 ONNX")
+      .find((element) => element.closest("article"))
+      ?.closest("article");
     expect(kokoroCard).not.toBeNull();
     expect(within(kokoroCard as HTMLElement).getByText(/recommended/i)).toBeInTheDocument();
     expect(within(kokoroCard as HTMLElement).getByText(/built in/i)).toBeInTheDocument();
+    expect(within(kokoroCard as HTMLElement).getByText(/82\/100/i)).toBeInTheDocument();
     await user.click(within(kokoroCard as HTMLElement).getByRole("button", { name: /install/i }));
     expect(fetchMock).toHaveBeenCalledWith(
       "http://backend/api/model-packs/kokoro-v1-onnx/install",
@@ -468,6 +481,7 @@ describe("ClonePanel", () => {
     await user.click(view.getByRole("tab", { name: /record/i }));
     expect(view.getByText(/read this aloud/i)).toBeInTheDocument();
     expect(view.getByText(/this is my Kural voice sample/i)).toBeInTheDocument();
+    expect(view.getByLabelText(/script/i)).toBeInTheDocument();
     expect(view.getByRole("button", { name: /start recording/i })).toBeInTheDocument();
   });
 });

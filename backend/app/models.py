@@ -58,6 +58,9 @@ class ModelPackInfo(BaseModel):
     ] = None
     manifest_digest: Optional[str] = None
     recommended: bool = False
+    quality_score: int = Field(default=0, ge=0, le=100)
+    latency_tier: Literal["realtime", "interactive", "batch", "manual"] = "manual"
+    routing_hints: list[str] = Field(default_factory=list)
     detail: Optional[str] = None
     actions: list[ModelPackAction] = Field(default_factory=list)
 

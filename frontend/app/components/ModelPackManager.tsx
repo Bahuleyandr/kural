@@ -72,6 +72,9 @@ function fallbackPacks(models: LocalModelInfo[]): ModelPackInfo[] {
     trust_level: "external_runtime",
     manifest_digest: null,
     recommended: model.status === "ready",
+    quality_score: model.status === "ready" ? 70 : 0,
+    latency_tier: model.category === "asr" ? "realtime" : "manual",
+    routing_hints: model.capabilities || [],
     detail: model.detail,
     actions: [],
   }));
@@ -101,6 +104,15 @@ export function ModelPackManager(props: {
   const effectivePacks = recommendedOnly ? allPacks.filter((pack) => pack.recommended) : allPacks;
   const activeJobs = jobs.filter((job) => !TERMINAL.has(job.status));
   const ready = effectivePacks.filter((pack) => pack.status === "ready").length;
+  const workstationScore = Math.round(
+    effectivePacks.reduce((total, pack) => {
+      const installedBonus = pack.status === "ready" ? 15 : 0;
+      return total + Math.min(100, (pack.quality_score || 0) + installedBonus);
+    }, 0) / Math.max(1, effectivePacks.length)
+  );
+  const bestPacks = [...effectivePacks]
+    .sort((a, b) => (b.quality_score || 0) - (a.quality_score || 0))
+    .slice(0, 3);
 
   const grouped = useMemo(
     () =>
@@ -269,6 +281,34 @@ export function ModelPackManager(props: {
         })}
       </div>
 
+      <section className="rounded border border-slate-300 bg-white p-4" aria-label="Local model benchmark">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Local Quality Router</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Uses manifest quality, readiness, latency tier, and capabilities to suggest local routing.
+            </p>
+          </div>
+          <span className="rounded border border-slate-200 px-3 py-1 text-sm">
+            workstation {workstationScore}/100
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          {bestPacks.map((pack) => (
+            <div key={pack.id} className="rounded border border-slate-200 bg-slate-50 p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{pack.name}</span>
+                <span className="text-xs text-slate-500">{pack.quality_score || 0}/100</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-600">
+                {(pack.latency_tier || "manual").replace("_", " ")} /{" "}
+                {(pack.routing_hints || []).slice(0, 2).join(", ") || "manual routing"}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {jobs.length > 0 && (
         <section className="rounded border border-slate-300 bg-white p-4" aria-label="Model-pack jobs">
           <h3 className="font-semibold">Recent jobs</h3>
@@ -343,6 +383,14 @@ export function ModelPackManager(props: {
                     <dt className="font-medium text-slate-700">Manifest</dt>
                     <dd>{pack.manifest_digest ? pack.manifest_digest.slice(0, 19) : "runtime reported"}</dd>
                   </div>
+                  <div>
+                    <dt className="font-medium text-slate-700">Quality</dt>
+                    <dd>{pack.quality_score || 0}/100</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-slate-700">Latency</dt>
+                    <dd>{pack.latency_tier || "manual"}</dd>
+                  </div>
                 </dl>
                 {pack.installed_path && (
                   <p className="mt-2 break-all text-xs text-slate-500">Path: {pack.installed_path}</p>
@@ -359,6 +407,15 @@ export function ModelPackManager(props: {
                   </p>
                 )}
                 {pack.detail && <p className="mt-2 text-sm text-slate-700">{pack.detail}</p>}
+                {(pack.routing_hints || []).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(pack.routing_hints || []).slice(0, 5).map((hint) => (
+                      <span key={hint} className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                        {hint}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {pack.actions.map((action) => (
                     <button

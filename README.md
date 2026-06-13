@@ -129,6 +129,7 @@ pip install -e .
 kural speak "Hello, world!"
 kural voices --clones
 kural models
+kural agent profile --json
 kural projects inspect ./demo.kuralproj
 ```
 
@@ -186,10 +187,11 @@ The workstation tabs are organised around day-to-day creator workflows:
 
 - **Write:** single, batch, SSML, performance style, and advanced audio controls.
 - **Quality:** A/B render the same line across styles, inspect waveform/loudness cues, get naturalness coaching, and reuse the best settings.
-- **Voices:** engine inventory, cloned voices, and voice import/export.
-- **Models:** local pack readiness, recommended-pack filtering, manifest trust metadata, and safe backend install/update/remove jobs for Kokoro, Supertonic, Chatterbox, Faster-Whisper, Vosk, Argos, IndicTrans2, and NLLB slots.
-- **Dubbing:** subtitle/audio imports, timeline overview, local translation, split/merge segment editing, per-segment render, alignment checks, render-plan export, transcript export, overrun warnings, and stitched WAV export.
+- **Voices:** engine inventory, Clone Studio readiness scoring, guided recording scripts, cloned voices, readiness-report export, and voice import/export.
+- **Models:** local pack readiness, recommended-pack filtering, manifest trust metadata, quality/routing hints, and safe backend install/update/remove jobs for Kokoro, Supertonic, Chatterbox, Faster-Whisper, Vosk, Argos, IndicTrans2, and NLLB slots.
+- **Dubbing:** subtitle/audio imports, speaker-track voice assignment, timeline overview, local translation, split/merge segment editing, per-segment render, alignment checks, render-plan/MP4 mux-script export, transcript export, overrun warnings, and stitched WAV export.
 - **Pronunciation:** ordered language-aware pronunciation rules with preview render plus JSON profile import/export.
+- **Script:** SSML chips, find/replace, version history, script diagnostics, and punctuation cleanup.
 - **Library:** local generated clips.
 - **Settings:** project vault snapshots, dictation controls, desktop diagnostics with repair actions, privacy/safety posture, and exportable consent ledger.
 

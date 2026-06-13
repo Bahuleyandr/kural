@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { Mode } from "../lib/types";
 
@@ -19,6 +19,28 @@ const SSML_CHIPS = [
   { label: "Phoneme", value: '<phoneme alphabet="ipa" ph="kuːrəl">Kural</phoneme>' },
 ];
 
+function analyzeScript(text: string) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const sentences = text.split(/[.!?]+/).map((part) => part.trim()).filter(Boolean);
+  const longestSentence = sentences.reduce(
+    (longest, sentence) => Math.max(longest, sentence.split(/\s+/).filter(Boolean).length),
+    0
+  );
+  const estimatedSeconds = Math.round((words.length / 155) * 60);
+  const issues: string[] = [];
+  if (longestSentence > 32) issues.push("Split long sentences for more natural breath points.");
+  if (words.length > 40 && !/[,.!?]/.test(text)) issues.push("Add punctuation before synthesis.");
+  if (/\s{3,}/.test(text)) issues.push("Collapse extra spacing to avoid odd pauses.");
+  if (/[A-Z]{8,}/.test(text)) issues.push("Avoid long all-caps words unless shouting is intended.");
+  return {
+    words: words.length,
+    sentences: sentences.length,
+    longestSentence,
+    estimatedSeconds,
+    issues,
+  };
+}
+
 export function ScriptStudio(props: {
   text: string;
   mode: Mode;
@@ -30,6 +52,7 @@ export function ScriptStudio(props: {
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [versions, setVersions] = useState<ScriptVersion[]>([]);
+  const stats = useMemo(() => analyzeScript(props.text), [props.text]);
 
   function insertSnippet(snippet: string) {
     const textarea = textareaRef.current;
@@ -75,6 +98,17 @@ export function ScriptStudio(props: {
     ]);
   }
 
+  function cleanupScript() {
+    props.onTextChange(
+      props.text
+        .replace(/[ \t]+/g, " ")
+        .replace(/\s+([,.!?;:])/g, "$1")
+        .replace(/([,.!?;:])(?=\S)/g, "$1 ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+    );
+  }
+
   return (
     <section className="rounded border border-slate-300 bg-white p-3" aria-labelledby="script-studio-heading">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -107,6 +141,34 @@ export function ScriptStudio(props: {
           </button>
         ))}
       </div>
+
+      <div className="mt-3 grid gap-2 text-sm md:grid-cols-4">
+        <div className="rounded border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase text-slate-500">Words</p>
+          <p className="font-semibold">{stats.words}</p>
+        </div>
+        <div className="rounded border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase text-slate-500">Sentences</p>
+          <p className="font-semibold">{stats.sentences}</p>
+        </div>
+        <div className="rounded border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase text-slate-500">Longest</p>
+          <p className="font-semibold">{stats.longestSentence} words</p>
+        </div>
+        <div className="rounded border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase text-slate-500">Read time</p>
+          <p className="font-semibold">{stats.estimatedSeconds}s</p>
+        </div>
+      </div>
+      {stats.issues.length > 0 && (
+        <ul className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+          {stats.issues.map((issue) => (
+            <li key={issue} className="rounded border border-amber-200 bg-amber-50 px-3 py-2">
+              {issue}
+            </li>
+          ))}
+        </ul>
+      )}
 
       <label className="mt-3 block text-sm font-medium">
         Text
@@ -152,6 +214,23 @@ export function ScriptStudio(props: {
           onClick={replaceAll}
         >
           All
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={cleanupScript}
+        >
+          Clean Punctuation
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          onClick={() => insertSnippet(' <break time="250ms"/> ')}
+        >
+          Insert Pause
         </button>
       </div>
 

@@ -25,8 +25,11 @@ export function DubbingTimeline(props: {
   onSplitSegment: (segment: DubbingSegment) => void;
   onMergeWithNext: (segment: DubbingSegment) => void;
   onApplySuggestedSpeed: (segment: DubbingSegment) => void;
+  onApplySpeakerVoice: (speaker: string, voiceId: string) => void;
+  onApplySpeakerSpeed: (speaker: string, speed: number) => void;
   onExportTimeline: () => void;
   onExportRenderPlan: () => void;
+  onExportMuxScript: () => void;
   onExportTranscript: (format: "srt" | "vtt" | "csv") => void;
   onUpdateSegment: (segmentId: string, fields: Partial<DubbingSegment>) => void;
 }) {
@@ -43,6 +46,15 @@ export function DubbingTimeline(props: {
   const speakers = Array.from(
     new Set(props.segments.map((segment) => segment.speaker || "Speaker 1"))
   );
+  const speakerStats = speakers.map((speaker) => {
+    const segments = props.segments.filter((segment) => (segment.speaker || "Speaker 1") === speaker);
+    const ready = segments.filter((segment) => segment.status === "ready").length;
+    const voiceId = segments.find((segment) => segment.voiceId)?.voiceId || props.selectedVoiceKey;
+    const speed =
+      segments.reduce((total, segment) => total + segment.controls.speed, 0) /
+      Math.max(1, segments.length);
+    return { speaker, segments, ready, voiceId, speed };
+  });
 
   return (
     <section className="space-y-4" aria-labelledby="dubbing-timeline-heading">
@@ -117,6 +129,14 @@ export function DubbingTimeline(props: {
           >
             Export Render Plan
           </button>
+          <button
+            type="button"
+            className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+            disabled={props.segments.length === 0}
+            onClick={props.onExportMuxScript}
+          >
+            MP4 Script
+          </button>
           {(["srt", "vtt", "csv"] as const).map((format) => (
             <button
               type="button"
@@ -136,6 +156,65 @@ export function DubbingTimeline(props: {
           </span>
         </div>
       </div>
+
+      {props.segments.length > 0 && (
+        <section className="rounded border border-slate-300 bg-white p-4" aria-label="Speaker tracks">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">Speaker Tracks</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Assign one voice and pacing profile per speaker before batch rendering.
+              </p>
+            </div>
+            <span className="rounded border border-slate-200 px-3 py-1 text-sm">
+              {speakers.length} speaker{speakers.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            {speakerStats.map((item) => (
+              <div key={item.speaker} className="rounded border border-slate-200 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{item.speaker}</span>
+                  <span className="text-xs text-slate-500">
+                    {item.ready}/{item.segments.length} ready
+                  </span>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_120px_auto]">
+                  <select
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    value={item.voiceId}
+                    aria-label={`Voice for ${item.speaker}`}
+                    onChange={(event) => props.onApplySpeakerVoice(item.speaker, event.target.value)}
+                  >
+                    {props.voiceOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    type="number"
+                    min={0.5}
+                    max={2}
+                    step={0.05}
+                    value={Number(item.speed.toFixed(2))}
+                    aria-label={`Speed for ${item.speaker}`}
+                    onChange={(event) => props.onApplySpeakerSpeed(item.speaker, Number(event.target.value))}
+                  />
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    onClick={() => props.onApplySpeakerSpeed(item.speaker, 1)}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {props.segments.length > 0 && (
         <section className="rounded border border-slate-300 bg-white p-4" aria-label="Timeline overview">

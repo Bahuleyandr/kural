@@ -36,6 +36,9 @@ def test_model_pack_inventory_lists_public_beta_packs():
     assert kokoro["recommended"] is True
     assert kokoro["trust_level"] == "built_in"
     assert kokoro["manifest_digest"].startswith("sha256:")
+    assert kokoro["quality_score"] >= 80
+    assert kokoro["latency_tier"] == "interactive"
+    assert "default-tts" in kokoro["routing_hints"]
     assert all(pack["manifest_digest"].startswith("sha256:") for pack in payload["packs"])
     assert payload["total"] == len(payload["packs"])
 

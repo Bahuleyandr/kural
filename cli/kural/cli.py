@@ -64,6 +64,48 @@ def inspect_project_archive_file(archive_file: str | Path) -> dict:
     }
 
 
+def build_agent_profile(host: str) -> dict:
+    """Return a read-only profile local agents can use for routing."""
+    voices = get_voices(host=host)
+    clones = list_clones(host=host)
+    model_payload = list_model_packs(host=host)
+    packs = model_payload.get("packs", [])
+    ready_packs = [pack for pack in packs if pack.get("status") == "ready"]
+    ready_categories = sorted({pack.get("category", "") for pack in ready_packs if pack.get("category")})
+    return {
+        "schema_version": 1,
+        "kind": "kural-local-agent-profile",
+        "host": host,
+        "voice_count": len(voices),
+        "clone_count": len(clones),
+        "ready_model_categories": ready_categories,
+        "capabilities": {
+            "tts": bool(voices),
+            "voice_clone_use": bool(clones),
+            "voice_clone_create": "human-consent-required",
+            "asr": "asr" in ready_categories,
+            "translation": "translation" in ready_categories,
+            "project_archive_inspection": True,
+            "model_install": "human-confirmation-required",
+        },
+        "recommended_tools": [
+            "list_voices",
+            "list_cloned_voices",
+            "list_model_packs",
+            "synthesize",
+            "transcribe",
+            "inspect_project_archive",
+        ],
+        "best_routes": {
+            "tts": [pack.get("id") for pack in ready_packs if pack.get("category") == "tts"][:3],
+            "asr": [pack.get("id") for pack in ready_packs if pack.get("category") == "asr"][:3],
+            "translation": [
+                pack.get("id") for pack in ready_packs if pack.get("category") == "translation"
+            ][:3],
+        },
+    }
+
+
 @click.group()
 @click.version_option(package_name="kural")
 def cli():
@@ -482,6 +524,8 @@ def models(host: str, category: str) -> None:
     table.add_column("Category")
     table.add_column("Status")
     table.add_column("Version")
+    table.add_column("Quality")
+    table.add_column("Latency")
     table.add_column("License")
     table.add_column("Path", overflow="fold")
 
@@ -491,6 +535,8 @@ def models(host: str, category: str) -> None:
             pack.get("category", ""),
             str(pack.get("status", "")).replace("_", " "),
             pack.get("version", ""),
+            str(pack.get("quality_score", "")),
+            pack.get("latency_tier", ""),
             pack.get("license") or "",
             pack.get("installed_path") or "",
         )
@@ -541,6 +587,49 @@ def projects_inspect(archive_file: str, as_json: bool) -> None:
         if isinstance(value, list):
             value = ", ".join(map(str, value)) if value else ""
         table.add_row(key.replace("_", " ").title(), str(value))
+    out_console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# agent
+# ---------------------------------------------------------------------------
+
+@cli.group("agent")
+def agent() -> None:
+    """Inspect local Kural capabilities for agent workflows."""
+
+
+@agent.command("profile")
+@click.option(
+    "--host",
+    default=DEFAULT_HOST,
+    show_default=True,
+    envvar="KURAL_HOST",
+    help="Kural backend URL (env: KURAL_HOST).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the profile as JSON.")
+def agent_profile(host: str, as_json: bool) -> None:
+    """Print a consent-safe local agent capability profile."""
+    try:
+        profile = build_agent_profile(host)
+    except httpx.ConnectError:
+        raise click.ClickException(f"Cannot connect to backend at {host}. Is it running?")
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:200]
+        raise click.ClickException(f"Backend returned {exc.response.status_code}: {detail}")
+
+    if as_json:
+        out_console.print_json(data=profile)
+        return
+
+    table = Table(title="Kural — Local Agent Profile", show_lines=False, box=None)
+    table.add_column("Capability", style="cyan")
+    table.add_column("Value", overflow="fold")
+    table.add_row("Voices", str(profile["voice_count"]))
+    table.add_row("Cloned voices", str(profile["clone_count"]))
+    table.add_row("Ready model categories", ", ".join(profile["ready_model_categories"]) or "none")
+    for name, value in profile["capabilities"].items():
+        table.add_row(name.replace("_", " "), str(value))
     out_console.print(table)
 
 

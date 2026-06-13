@@ -169,8 +169,11 @@ The inspector validates archive member paths before reading `manifest.json`, the
 - `recommended`: whether the pack is part of the suggested Public Beta local setup.
 - `trust_level`: one of `built_in`, `verified_manifest`, `user_supplied`, or `external_runtime`.
 - `manifest_digest`: a stable `sha256:` digest over the local manifest identity, version, source, checksum, license, and capabilities.
+- `quality_score`: local routing score from 0-100 for the pack's intended workflow.
+- `latency_tier`: one of `realtime`, `interactive`, `batch`, or `manual`.
+- `routing_hints`: short tags such as `default-tts`, `media-transcription`, or `offline-translation`.
 
-The UI uses these fields to filter recommended packs and show whether a pack comes from a bundled manifest, a user-supplied folder, or an external runtime such as Chatterbox.
+The UI uses these fields to filter recommended packs, show whether a pack comes from a bundled manifest, and build a local quality router for creator workflows.
 
 Delete a clone:
 
