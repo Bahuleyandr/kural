@@ -115,3 +115,31 @@ def test_import_clone_archive_rejects_path_traversal():
 
     with pytest.raises(ValueError, match="Unsafe archive path"):
         import_voice_archive(buf.getvalue())
+
+
+def test_import_rejects_oversized_manifest(monkeypatch):
+    from app.tts.chatterbox_engine import archive as archive_mod
+
+    monkeypatch.setattr(archive_mod, "_ARCHIVE_MAX_MANIFEST_BYTES", 8)
+    meta = save_voice_sample(wav_bytes(5.0), "Big manifest", consent_confirmed=True)
+    archive = export_cloned_voices([meta["id"]])
+    delete_cloned_voice(meta["id"])
+
+    with pytest.raises(ValueError, match="too large"):
+        import_voice_archive(archive)
+
+
+def test_import_writes_consent_ledger_entry(monkeypatch, tmp_path):
+    consent_log = tmp_path / "consent.log"
+    monkeypatch.setattr(settings, "consent_log_path", str(consent_log))
+
+    meta = save_voice_sample(wav_bytes(5.0), "Ledger voice", consent_confirmed=True)
+    archive = export_cloned_voices([meta["id"]])
+    delete_cloned_voice(meta["id"])
+
+    import_voice_archive(archive)
+
+    entries = [json.loads(line) for line in consent_log.read_text(encoding="utf-8").splitlines() if line]
+    imported_entries = [e for e in entries if e.get("source") == "archive-import"]
+    assert imported_entries, "import must leave a consent-ledger entry"
+    assert imported_entries[0]["consent_confirmed"] is True

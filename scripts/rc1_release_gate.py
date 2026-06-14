@@ -9,6 +9,7 @@ run a fast gate often and a full gate before tagging.
 from __future__ import annotations
 
 import argparse
+import base64
 import os
 import shutil
 import subprocess
@@ -50,6 +51,18 @@ def run_step(step: Step) -> None:
     )
 
 
+def _ephemeral_pubkey() -> str:
+    """A render-only updater key that passes render-release-config's format
+    check (valid base64, >=32 bytes). Real releases set KURAL_UPDATER_PUBLIC_KEY;
+    the gate only exercises the render path, not signing. The old "test-public-key"
+    default is now (correctly) rejected by the renderer, which is the point — a
+    placeholder key must never reach a real bundle."""
+    configured = os.environ.get("KURAL_UPDATER_PUBLIC_KEY", "").strip()
+    if configured:
+        return configured
+    return base64.b64encode(b"kural-rc1-gate-ephemeral-render-only-pubkey-0000").decode()
+
+
 def render_release_config() -> None:
     with tempfile.TemporaryDirectory(prefix="kural-rc1-") as temp_dir:
         run_step(
@@ -62,7 +75,7 @@ def render_release_config() -> None:
                     str(Path(temp_dir) / "tauri-release.conf.json"),
                 ],
                 cwd=REPO_ROOT,
-                env={"KURAL_UPDATER_PUBLIC_KEY": os.environ.get("KURAL_UPDATER_PUBLIC_KEY", "test-public-key")},
+                env={"KURAL_UPDATER_PUBLIC_KEY": _ephemeral_pubkey()},
             )
         )
 
@@ -70,7 +83,16 @@ def render_release_config() -> None:
 def smoke_fake_artifacts() -> None:
     with tempfile.TemporaryDirectory(prefix="kural-artifacts-") as temp_dir:
         artifact_dir = Path(temp_dir)
-        (artifact_dir / "Kural.AppImage").write_text("artifact", encoding="utf-8")
+        # Cover the Windows installer shapes (the public-beta target) alongside
+        # the Linux AppImage, so the smoke checker is exercised on representative
+        # artifact names rather than Linux-only ones.
+        for name in (
+            "Kural_0.2.0_x64-setup.exe",
+            "Kural_0.2.0_x64_en-US.msi",
+            "Kural.AppImage",
+        ):
+            (artifact_dir / name).write_text("artifact", encoding="utf-8")
+        (artifact_dir / "Kural_0.2.0_x64-setup.exe.sig").write_text("signature", encoding="utf-8")
         (artifact_dir / "Kural.AppImage.sig").write_text("signature", encoding="utf-8")
         (artifact_dir / "latest.json").write_text('{"version":"0.2.0"}', encoding="utf-8")
         run_step(
@@ -144,6 +166,8 @@ def main() -> int:
 
     steps = [
         Step("Backend pytest", [sys.executable, "-m", "pytest"], REPO_ROOT / "backend"),
+        Step("CLI pytest", [sys.executable, "-m", "pytest"], REPO_ROOT / "cli"),
+        Step("MCP pytest", [sys.executable, "-m", "pytest"], REPO_ROOT / "mcp"),
         Step("Frontend install", [*PNPM, "install", "--frozen-lockfile"], REPO_ROOT / "frontend", optional_executable="npx"),
         Step("Frontend lint", [*PNPM, "run", "lint"], REPO_ROOT / "frontend"),
         Step("Frontend unit tests", [*PNPM, "run", "test:unit"], REPO_ROOT / "frontend"),

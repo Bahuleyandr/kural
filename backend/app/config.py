@@ -1,10 +1,26 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .version import APP_VERSION
 
 
+def _kural_alias(*names: str) -> AliasChoices:
+    """Accept both the documented ``KURAL_``-prefixed env var and the bare name.
+
+    pydantic-settings binds a field to an env var matching the field name, so
+    without an explicit alias a field like ``api_key`` only reads ``API_KEY`` —
+    never ``KURAL_API_KEY``, which is what the docs, docker-compose, the desktop
+    shell, and the MCP client all set. Listing both names here keeps the
+    prefixed form (which everything actually exports) working while preserving
+    the bare name for backwards compatibility.
+    """
+    return AliasChoices(*names)
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")
+    # populate_by_name lets code still construct Settings(api_key=...) even
+    # though the field carries a validation_alias.
+    model_config = SettingsConfigDict(env_file=".env", populate_by_name=True)
 
     app_version: str = APP_VERSION
     tts_engine: str = "kokoro-onnx"
@@ -19,10 +35,10 @@ class Settings(BaseSettings):
     ]
     max_text_length: int = 10000
 
-    # Optional shared-secret API key. When set (KURAL_API_KEY env var), all
-    # /api/* requests must send X-API-Key. Empty string disables auth — the
-    # default for local single-user installs.
-    api_key: str = ""
+    # Optional shared-secret API key. When set (KURAL_API_KEY env var, or the
+    # legacy bare API_KEY), all /api/* requests must send X-API-Key. Empty
+    # string disables auth — the default for local single-user installs.
+    api_key: str = Field(default="", validation_alias=_kural_alias("KURAL_API_KEY", "API_KEY"))
 
     # Per-IP rate limits, slowapi syntax. Synthesis is CPU-heavy; cloning
     # writes durable state, so it stays tighter.
@@ -34,8 +50,14 @@ class Settings(BaseSettings):
 
     # Vendor-neutral, opt-in error reporting. Both must be set for any
     # outbound network traffic to occur.
-    telemetry_opt_in: bool = False
-    telemetry_endpoint: str = ""
+    telemetry_opt_in: bool = Field(
+        default=False,
+        validation_alias=_kural_alias("KURAL_TELEMETRY_OPT_IN", "TELEMETRY_OPT_IN"),
+    )
+    telemetry_endpoint: str = Field(
+        default="",
+        validation_alias=_kural_alias("KURAL_TELEMETRY_ENDPOINT", "TELEMETRY_ENDPOINT"),
+    )
 
     # Optional path to a JSON file describing extra Kokoro voice IDs the
     # frontend should expose. Each entry follows the same shape as the
@@ -81,9 +103,18 @@ class Settings(BaseSettings):
 
     # Optional local agent and media tools. These are never launched from the
     # browser UI; Kural only probes or calls known local endpoints/binaries.
-    ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "llama3.1:8b"
-    lip_sync_binary: str = ""
+    ollama_url: str = Field(
+        default="http://127.0.0.1:11434",
+        validation_alias=_kural_alias("KURAL_OLLAMA_URL", "OLLAMA_URL"),
+    )
+    ollama_model: str = Field(
+        default="llama3.1:8b",
+        validation_alias=_kural_alias("KURAL_OLLAMA_MODEL", "OLLAMA_MODEL"),
+    )
+    lip_sync_binary: str = Field(
+        default="",
+        validation_alias=_kural_alias("KURAL_LIP_SYNC_BINARY", "LIP_SYNC_BINARY"),
+    )
 
 
 settings = Settings()

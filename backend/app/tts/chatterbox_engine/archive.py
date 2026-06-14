@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 from typing import Iterable
 
 from ...config import settings
+from ...consent import IMPORT_CONSENT_TEXT, record_consent
 from .storage import (
     _CONSENT_WATERMARK,
     _dedupe_name,
@@ -26,6 +27,10 @@ from .storage import (
 _ARCHIVE_SCHEMA = "kural.voice-archive.v1"
 _ARCHIVE_MANIFEST = "manifest.json"
 _ARCHIVE_MAX_VOICES = 200
+# Cap the manifest's *uncompressed* size before reading it so a tiny zip can't
+# decompress into a multi-GB JSON blob (decompression bomb). Sample entries are
+# already size-checked before read; this closes the same hole for manifest.json.
+_ARCHIVE_MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 
 
 def _validate_archive_path(name: str) -> str:
@@ -106,8 +111,12 @@ def import_voice_archive(archive_bytes: bytes) -> list[dict]:
         if _ARCHIVE_MANIFEST not in entries:
             raise ValueError("Voice archive is missing manifest.json.")
 
+        manifest_info = entries[_ARCHIVE_MANIFEST]
+        if manifest_info.file_size > _ARCHIVE_MAX_MANIFEST_BYTES:
+            raise ValueError("Voice archive manifest.json is too large.")
+
         try:
-            manifest = json.loads(archive.read(entries[_ARCHIVE_MANIFEST]))
+            manifest = json.loads(archive.read(manifest_info))
         except json.JSONDecodeError as exc:
             raise ValueError("Voice archive manifest is not valid JSON.") from exc
 
@@ -187,6 +196,19 @@ def import_voice_archive(archive_bytes: bytes) -> list[dict]:
                 }
                 imported.append(_write_clone_record(meta, sample_bytes))
                 written_ids.append(imported_id)
+                # Keep the consent ledger complete: an imported voice that
+                # claims consent must leave an audit entry tagged as imported
+                # (consent asserted by the archive, not re-attested here).
+                record_consent(
+                    voice_id=imported_id,
+                    voice_name=name,
+                    sample_bytes=sample_bytes,
+                    client_host="archive-import",
+                    language=meta["language"],
+                    source="archive-import",
+                    consent_text=IMPORT_CONSENT_TEXT,
+                    consent_confirmed=consent_confirmed,
+                )
         except Exception:
             for voice_id in written_ids:
                 shutil.rmtree(_voice_dir(voice_id), ignore_errors=True)

@@ -66,6 +66,7 @@ async def runtime_health_checks() -> RuntimeHealthChecksResponse:
     kokoro_root = _expand(settings.model_cache_dir)
     ffmpeg = shutil.which("ffmpeg")
     lip_sync = settings.lip_sync_binary.strip()
+    lip_sync_ready = bool(lip_sync) and Path(lip_sync).expanduser().exists()
     checks: list[RuntimeCheck] = [
         RuntimeCheck(
             id="kokoro-models",
@@ -91,9 +92,15 @@ async def runtime_health_checks() -> RuntimeHealthChecksResponse:
         RuntimeCheck(
             id="lip-sync",
             label="Optional lip-sync runtime",
-            status="ready" if lip_sync and Path(lip_sync).expanduser().exists() else "missing",
-            detail=lip_sync or "No KURAL_LIP_SYNC_BINARY configured",
-            repair_action=None if lip_sync else "configure_lip_sync_binary",
+            status="ready" if lip_sync_ready else "missing",
+            detail=(
+                lip_sync
+                if lip_sync_ready
+                else f"Configured binary not found: {lip_sync}"
+                if lip_sync
+                else "No KURAL_LIP_SYNC_BINARY configured"
+            ),
+            repair_action=None if lip_sync_ready else "configure_lip_sync_binary",
         ),
     ]
     storage_bytes, storage_files = _dir_size(model_root)
@@ -114,6 +121,14 @@ async def runtime_health_checks() -> RuntimeHealthChecksResponse:
 @router.post("/runtime/repair", response_model=RuntimeRepairResponse, status_code=202)
 async def repair_runtime(req: RuntimeRepairRequest) -> RuntimeRepairResponse:
     if req.action == "create_clone_folder":
+        if not settings.clone_cache_dir.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "unsafe_repair_path",
+                    "message": "Clone storage path is not configured.",
+                },
+            )
         clone_root = _assert_repair_path(_expand(settings.clone_cache_dir), "Clone storage")
         clone_root.mkdir(parents=True, exist_ok=True)
         return RuntimeRepairResponse(

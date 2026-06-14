@@ -823,12 +823,34 @@ def validate_checksum(path: Path, checksum: str | None) -> None:
         raise ModelPackError(f"Checksum mismatch for {path.name}: expected {expected}, got {actual}")
 
 
+def _pinned_kokoro_checksums() -> dict[str, str]:
+    """Per-file SHA-256 digests for the Kokoro assets, if the operator pinned
+    them via env. Empty by default — ``download_models.py`` is the primary
+    integrity gate (it verifies during download); this is post-install
+    defense-in-depth that also catches on-disk corruption / a stale ``.part``.
+    """
+    return {
+        settings.kokoro_model_file: os.environ.get("KURAL_KOKORO_MODEL_SHA256", "").strip(),
+        settings.kokoro_voices_file: os.environ.get("KURAL_KOKORO_VOICES_SHA256", "").strip(),
+    }
+
+
+def _verify_pinned_assets(root: Path, checksums: dict[str, str]) -> None:
+    for name, checksum in checksums.items():
+        if not checksum:
+            continue
+        digest = checksum if checksum.startswith("sha256:") else f"sha256:{checksum}"
+        validate_checksum(root / name, digest)
+
+
 def _install_or_update(job_id: str, manifest: ModelPackManifest) -> None:
     env = os.environ.copy()
     scripts = _scripts_dir()
     if manifest.install_kind == "download-kokoro":
-        env["MODEL_CACHE_DIR"] = str(_expand(settings.model_cache_dir) or _model_pack_root() / "kokoro")
+        model_root = _expand(settings.model_cache_dir) or _model_pack_root() / "kokoro"
+        env["MODEL_CACHE_DIR"] = str(model_root)
         _run_command(job_id, [sys.executable, str(scripts / "download_models.py")], env)
+        _verify_pinned_assets(model_root, _pinned_kokoro_checksums())
         return
 
     if manifest.install_kind == "download-supertonic":
@@ -868,6 +890,23 @@ def _install_or_update(job_id: str, manifest: ModelPackManifest) -> None:
     )
 
 
+def _assert_kural_owned(path: Path, manifest: ModelPackManifest) -> None:
+    """Refuse to bulk-delete a directory Kural does not own.
+
+    Some packs (notably Argos) default their path to a *shared* OS location
+    such as ``~/.local/share/argos-translate/packages``, which can hold
+    packages the user installed outside Kural. Only remove paths under the
+    Kural model root so a pack "remove" can never wipe a third-party store.
+    """
+    root = _model_pack_root()
+    if not (path == root or _is_within(path, root)):
+        raise ModelPackError(
+            f"{manifest.name} lives in a shared or external location ({path}) that "
+            "Kural does not manage; remove it with the tool that installed it "
+            "(for Argos, use argospm) instead of deleting the whole folder."
+        )
+
+
 def _remove_manifest_files(manifest: ModelPackManifest) -> None:
     path = _expand(manifest.path_setting)
     if path is None:
@@ -875,6 +914,7 @@ def _remove_manifest_files(manifest: ModelPackManifest) -> None:
     if not path.exists():
         return
     _assert_safe_delete_target(path)
+    _assert_kural_owned(path, manifest)
     if path.is_file():
         path.unlink()
     else:
