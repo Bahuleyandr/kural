@@ -11,9 +11,11 @@ Hardening:
 - Each file streams to a ``.part`` temp and is only renamed into place on
   success, so an interrupted download never leaves a half-written model that
   looks valid to the engine.
-- Files are checked against a pinned SHA-256 when one is configured (env
-  ``KURAL_KOKORO_MODEL_SHA256`` / ``KURAL_KOKORO_VOICES_SHA256``). Set
-  ``KURAL_REQUIRE_MODEL_CHECKSUM=1`` to refuse any unpinned download.
+- Files are verified against a pinned SHA-256 **by default** (the official
+  upstream digests are baked in below). Override per-file with
+  ``KURAL_KOKORO_MODEL_SHA256`` / ``KURAL_KOKORO_VOICES_SHA256``, or set either
+  to empty to skip that file. ``KURAL_REQUIRE_MODEL_CHECKSUM=1`` refuses any
+  download that ends up unpinned.
 """
 import argparse
 import hashlib
@@ -40,11 +42,21 @@ FILES = {
 }
 
 # Pinned digests close the supply-chain gap: a compromised or redirected mirror
-# is rejected before the file is used. Empty by default (the authentic upstream
-# digests are not vendored in-tree); pin them via env to enforce verification.
+# is rejected before the file is used. These are the official upstream
+# model-files-v1.0 assets (verified over HTTPS from the canonical release), so
+# verification is ON by default. Override per-file via env to pin a different
+# upstream, or set the var to empty to skip verification for that file.
+_PINNED_SHA256 = {
+    "kokoro-v1.0.int8.onnx": "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb",
+    "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+}
 EXPECTED_SHA256 = {
-    "kokoro-v1.0.int8.onnx": os.environ.get("KURAL_KOKORO_MODEL_SHA256", "").strip().lower(),
-    "voices-v1.0.bin": os.environ.get("KURAL_KOKORO_VOICES_SHA256", "").strip().lower(),
+    "kokoro-v1.0.int8.onnx": os.environ.get(
+        "KURAL_KOKORO_MODEL_SHA256", _PINNED_SHA256["kokoro-v1.0.int8.onnx"]
+    ).strip().lower(),
+    "voices-v1.0.bin": os.environ.get(
+        "KURAL_KOKORO_VOICES_SHA256", _PINNED_SHA256["voices-v1.0.bin"]
+    ).strip().lower(),
 }
 
 DOWNLOAD_TIMEOUT_S = int(os.environ.get("KURAL_DOWNLOAD_TIMEOUT_S", "300"))
@@ -102,8 +114,8 @@ def _download(filename: str, url: str, dest: Path) -> None:
             )
     else:
         print(
-            f"\n  WARNING: {filename} installed without checksum verification "
-            "(set KURAL_KOKORO_*_SHA256 to pin).",
+            f"\n  WARNING: {filename} installed WITHOUT checksum verification "
+            "(its KURAL_KOKORO_*_SHA256 override was set empty).",
             file=sys.stderr,
         )
     tmp.replace(dest)
