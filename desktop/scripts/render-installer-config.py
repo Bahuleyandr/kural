@@ -71,7 +71,11 @@ def main() -> int:
             "targets": bundle_targets,
             "resources": resources,
         },
-        "plugins": {"updater": {"active": False}},
+        # No updater for local/unsigned installer builds. In Tauri v2 the updater
+        # is gated by endpoints + pubkey + createUpdaterArtifacts (set only by the
+        # release overlay), so omitting it here disables auto-update. (The old
+        # ``updater.active`` flag was a Tauri v1 leftover and is not a v2 field.)
+        "plugins": {},
     }
 
     output = Path(args.output).resolve()

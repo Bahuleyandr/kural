@@ -28,10 +28,14 @@ cd desktop
 ```
 
 Both wrappers shell out to `desktop/scripts/build_desktop.py installer`. The
-script provisions a bundled Python backend runtime with Kokoro and Chatterbox,
-downloads the Kokoro ONNX weights into `desktop/runtime/models/kokoro`, renders
-the installer config, builds the static frontend, builds the Tauri installer,
-and runs `smoke-release-artifacts.py` against the output.
+script provisions a bundled **relocatable** Python backend runtime
+(python-build-standalone, not a venv — so it runs on a clean machine with no
+system Python), installs Kokoro and Chatterbox into it, downloads the Kokoro
+ONNX weights into `desktop/runtime/models/kokoro`, renders the installer config,
+builds the static frontend, builds the Tauri installer, and runs
+`smoke-release-artifacts.py` against the output. Pin the runtime with
+`KURAL_PYTHON_VERSION` / `KURAL_PBS_RELEASE` if the defaults don't suit your
+platform.
 
 Optional flags forwarded straight through to `build_desktop.py`:
 
@@ -80,7 +84,10 @@ Tauri's auto-updater uses a separate Ed25519 keypair from OS code-signing.
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — optional, only if the key is
      password-encrypted
 
-The release workflow refuses to run without these.
+The release workflow refuses to run without these. `render-release-config.py`
+now validates `KURAL_UPDATER_PUBLIC_KEY` (must be base64, ≥32 bytes) and rejects
+placeholders, so a typo'd or dummy key can't ship a bundle whose auto-update
+could never verify a signature.
 
 ## Windows Authenticode Signing
 
@@ -137,10 +144,17 @@ Always runs as the last step of any release build:
 ```bash
 cd desktop
 python scripts/smoke-release-artifacts.py --require-signatures
+# On a signed Windows build, also cryptographically verify Authenticode:
+python scripts/smoke-release-artifacts.py --require-signatures --verify-authenticode
 ```
 
-Verifies bundle existence, non-empty size, presence of updater `.sig` files,
-and parses any `latest.json` to ensure it has a version field.
+Verifies bundle existence, non-empty size, presence of **non-empty** updater
+`.sig` files, and parses any `latest.json` to ensure it has a version field. It
+also fails if the static frontend export (`index.html` / `dictation.html`) uses
+absolute `/_next` asset URLs. `--verify-authenticode` additionally runs
+`signtool verify /pa` on every `.exe`/`.msi` — a real signature check, not just
+the presence of a `.sig` (off by default so the unsigned public beta still
+passes).
 
 ## Release Tagging
 
@@ -163,5 +177,7 @@ The release workflow triggers on `v*.*.*` tags. Track its run via
 - Apple Developer Program not yet enrolled.
 - GitHub Actions billing on this account is currently blocked, so the
   workflow above will not actually execute until that is resolved. Local
-  release builds (`build-release.{sh,ps1}`) work today; they just produce
-  unsigned bundles.
+  **installer** builds (`build-installer.{sh,ps1}`) work today and produce
+  unsigned bundles; `build-release.{sh,ps1}` is signed-only — it refuses to run
+  without `KURAL_UPDATER_PUBLIC_KEY` + `TAURI_SIGNING_PRIVATE_KEY`, and now warns
+  loudly when no Windows signing certificate is configured.

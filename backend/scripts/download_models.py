@@ -4,8 +4,19 @@
 Default: provision Kokoro ONNX into ~/.cache/kural/kokoro/.
 Pass --supertonic to also pre-warm the Supertonic model cache so first-use
 synthesis works fully offline.
+
+Hardening:
+- Network reads use ``KURAL_DOWNLOAD_TIMEOUT_S`` (default 300s) so a hung or
+  throttled mirror fails fast instead of blocking app startup forever.
+- Each file streams to a ``.part`` temp and is only renamed into place on
+  success, so an interrupted download never leaves a half-written model that
+  looks valid to the engine.
+- Files are checked against a pinned SHA-256 when one is configured (env
+  ``KURAL_KOKORO_MODEL_SHA256`` / ``KURAL_KOKORO_VOICES_SHA256``). Set
+  ``KURAL_REQUIRE_MODEL_CHECKSUM=1`` to refuse any unpinned download.
 """
 import argparse
+import hashlib
 import os
 import sys
 import urllib.request
@@ -28,12 +39,74 @@ FILES = {
     "voices-v1.0.bin": f"{_BASE}/voices-v1.0.bin",
 }
 
+# Pinned digests close the supply-chain gap: a compromised or redirected mirror
+# is rejected before the file is used. Empty by default (the authentic upstream
+# digests are not vendored in-tree); pin them via env to enforce verification.
+EXPECTED_SHA256 = {
+    "kokoro-v1.0.int8.onnx": os.environ.get("KURAL_KOKORO_MODEL_SHA256", "").strip().lower(),
+    "voices-v1.0.bin": os.environ.get("KURAL_KOKORO_VOICES_SHA256", "").strip().lower(),
+}
 
-def _progress(count, block_size, total_size):
+DOWNLOAD_TIMEOUT_S = int(os.environ.get("KURAL_DOWNLOAD_TIMEOUT_S", "300"))
+_REQUIRE_CHECKSUM = os.environ.get("KURAL_REQUIRE_MODEL_CHECKSUM", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+_CHUNK = 256 * 1024
+
+
+def _progress(read_bytes: int, total_size: int) -> None:
     if total_size > 0:
-        pct = int(count * block_size * 100 / total_size)
+        pct = int(read_bytes * 100 / total_size)
         sys.stdout.write(f"\r  {min(pct, 100):3d}%")
         sys.stdout.flush()
+
+
+def _download(filename: str, url: str, dest: Path) -> None:
+    expected = EXPECTED_SHA256.get(filename, "")
+    if not expected and _REQUIRE_CHECKSUM:
+        raise SystemExit(
+            f"Refusing to download {filename} without a pinned checksum "
+            "(KURAL_REQUIRE_MODEL_CHECKSUM is set)."
+        )
+
+    tmp = dest.with_name(dest.name + ".part")
+    digest = hashlib.sha256()
+    request = urllib.request.Request(url, headers={"User-Agent": "kural-model-downloader"})
+    try:
+        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_S) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            read = 0
+            with open(tmp, "wb") as handle:
+                while True:
+                    chunk = response.read(_CHUNK)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    read += len(chunk)
+                    _progress(read, total)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise SystemExit(f"Failed to download {filename}: {exc}") from exc
+
+    actual = digest.hexdigest()
+    if expected:
+        if actual != expected:
+            tmp.unlink(missing_ok=True)
+            raise SystemExit(
+                f"Checksum mismatch for {filename}: expected {expected}, got {actual}. "
+                "Refusing to install a model that does not match its pinned digest."
+            )
+    else:
+        print(
+            f"\n  WARNING: {filename} installed without checksum verification "
+            "(set KURAL_KOKORO_*_SHA256 to pin).",
+            file=sys.stderr,
+        )
+    tmp.replace(dest)
 
 
 def download_kokoro():
@@ -44,7 +117,7 @@ def download_kokoro():
             print(f"  {filename} — already cached, skipping")
             continue
         print(f"  Downloading {filename} ...")
-        urllib.request.urlretrieve(url, dest, reporthook=_progress)
+        _download(filename, url, dest)
         print(f"\r  {filename} — done ({dest.stat().st_size // 1024 // 1024} MB)")
     print(f"\nKokoro saved to {MODEL_DIR}")
 

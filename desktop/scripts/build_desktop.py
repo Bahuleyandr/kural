@@ -77,8 +77,10 @@ def _parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
 
 def _runtime_python_exe(runtime_python_dir: Path) -> Path:
     candidates = (
-        runtime_python_dir / "Scripts" / "python.exe",
+        runtime_python_dir / "python.exe",  # python-build-standalone (Windows)
+        runtime_python_dir / "bin" / "python3",  # python-build-standalone (Unix)
         runtime_python_dir / "bin" / "python",
+        runtime_python_dir / "Scripts" / "python.exe",  # legacy venv (Windows)
     )
     for candidate in candidates:
         if candidate.exists():
@@ -102,6 +104,24 @@ def _require_release_env() -> None:
         raise SystemExit(
             "Release builds require these env vars: " + ", ".join(missing)
         )
+
+
+def _warn_if_unsigned_windows() -> None:
+    """Public beta ships unsigned by design, but make that explicit at build time.
+
+    Authenticode signing is opt-in; without a cert the produced .exe/.msi is
+    unsigned and Windows SmartScreen warns users. Surface that loudly instead of
+    quietly handing over an unsigned 'release'.
+    """
+    if os.environ.get("KURAL_WIN_CERT_THUMBPRINT") or os.environ.get("KURAL_WIN_CERT_FILE"):
+        return
+    print(
+        "WARNING: no Windows code-signing certificate configured "
+        "(KURAL_WIN_CERT_THUMBPRINT). This release will be UNSIGNED and Windows "
+        "SmartScreen will warn users on first run. Set a certificate to sign, or "
+        "proceed with the documented unsigned public beta.",
+        file=sys.stderr,
+    )
 
 
 def _provision_runtime(args: argparse.Namespace, target: Path) -> None:
@@ -226,6 +246,7 @@ def main(argv: Sequence[str]) -> int:
     args, tauri_args = _parse_args(argv)
     if args.mode == "release":
         _require_release_env()
+        _warn_if_unsigned_windows()
 
     runtime_dir = DESKTOP_DIR / "runtime"
     runtime_python_dir = runtime_dir / "python"

@@ -22,6 +22,10 @@ CONSENT_TEXT = (
     "I confirm I have the right to clone this voice and that the speaker has "
     "given explicit, revocable consent to its synthesis."
 )
+IMPORT_CONSENT_TEXT = (
+    "Consent was asserted by the imported voice archive manifest and was not "
+    "re-attested in this install."
+)
 
 _log = logging.getLogger(__name__)
 _lock = threading.Lock()
@@ -38,18 +42,28 @@ def record_consent(
     sample_bytes: bytes,
     client_host: str | None,
     language: str | None,
+    source: str = "clone-upload",
+    consent_text: str = CONSENT_TEXT,
+    consent_confirmed: bool = True,
 ) -> None:
-    """Append a consent record. Best-effort — never raises into the caller."""
+    """Append a consent record. Best-effort — never raises into the caller.
+
+    ``source`` distinguishes a fresh clone upload from an archive import; the
+    latter carries consent asserted by the originating archive rather than a
+    re-attestation in this install, so the ledger stays complete and honest.
+    """
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "voice_id": voice_id,
         "voice_name": voice_name,
         "language": language,
         "client_host": client_host,
+        "source": source,
+        "consent_confirmed": consent_confirmed,
         "sample_sha256": hashlib.sha256(sample_bytes).hexdigest(),
         "sample_bytes": len(sample_bytes),
         "consent_text_version": CONSENT_TEXT_VERSION,
-        "consent_text": CONSENT_TEXT,
+        "consent_text": consent_text,
     }
     line = json.dumps(record, separators=(",", ":")) + "\n"
     path = _resolve_path()

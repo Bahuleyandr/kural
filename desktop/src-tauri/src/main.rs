@@ -81,9 +81,7 @@ fn ensure_api_key(app_data_dir: &Path) -> std::io::Result<String> {
 /// surfaces them via `__KURAL_BACKEND_ERROR__` so the frontend can show a
 /// setup banner instead of a blank "backend not reachable" message.
 fn ensure_kokoro_models(backend_dir: &Path, model_dir: &Path, python: &str) -> std::io::Result<()> {
-    let model_file = model_dir.join("kokoro-v1.0.int8.onnx");
-    let voices_file = model_dir.join("voices-v1.0.bin");
-    if model_file.exists() && voices_file.exists() {
+    if kokoro_models_present(model_dir) {
         return Ok(());
     }
 
@@ -117,12 +115,14 @@ fn ensure_kokoro_models(backend_dir: &Path, model_dir: &Path, python: &str) -> s
 
 /// Bind to port 0 and immediately release the socket to learn a free port.
 /// There is a small TOCTOU window, but it is acceptable for a desktop app.
-fn find_free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("failed to bind ephemeral port")
-        .local_addr()
-        .expect("failed to read local addr")
-        .port()
+/// Returns an error instead of panicking so a bind failure can be surfaced in
+/// the UI rather than crashing the process with no window.
+fn find_free_port() -> std::io::Result<u16> {
+    Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
+}
+
+fn kokoro_models_present(dir: &Path) -> bool {
+    dir.join("kokoro-v1.0.int8.onnx").exists() && dir.join("voices-v1.0.bin").exists()
 }
 
 /// Spawn the FastAPI backend via uvicorn.
@@ -167,37 +167,29 @@ fn start_backend(
     let explicit_python = env::var("KURAL_PYTHON").ok();
     let mut python_candidates: Vec<String> = Vec::new();
     if let Some(dir) = resource_dir_for_python {
+        // python-build-standalone layout (relocatable; the release bundle).
+        python_candidates.push(dir.join("python").join("python.exe").display().to_string());
         python_candidates.push(
-            dir.join("python")
-                .join("Scripts")
-                .join("python.exe")
-                .display()
-                .to_string(),
+            dir.join("python").join("bin").join("python3").display().to_string(),
+        );
+        // Legacy venv layout, kept as a fallback for older bundles.
+        python_candidates.push(
+            dir.join("python").join("Scripts").join("python.exe").display().to_string(),
         );
         python_candidates.push(
-            dir.join("python")
-                .join("bin")
-                .join("python")
-                .display()
-                .to_string(),
+            dir.join("python").join("bin").join("python").display().to_string(),
         );
     }
     python_candidates.push(
-        backend_dir
-            .join(".venv")
-            .join("Scripts")
-            .join("python.exe")
-            .display()
-            .to_string(),
+        backend_dir.join(".venv").join("Scripts").join("python.exe").display().to_string(),
     );
     python_candidates.push(
-        backend_dir
-            .join(".venv")
-            .join("bin")
-            .join("python")
-            .display()
-            .to_string(),
+        backend_dir.join(".venv").join("bin").join("python").display().to_string(),
     );
+    // The bare-PATH fallback is DEV ONLY. A release build must use the bundled
+    // runtime or an explicit KURAL_PYTHON — never a random interpreter on the
+    // user's PATH, which could be the wrong version or missing Kural's deps.
+    #[cfg(debug_assertions)]
     python_candidates.push(if cfg!(windows) {
         "python".to_string()
     } else {
@@ -215,22 +207,39 @@ fn start_backend(
             .ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "Could not find Python runtime. Set KURAL_PYTHON or bundle desktop/runtime/python.",
+                    "Could not find the bundled Python runtime. Set KURAL_PYTHON or bundle desktop/runtime/python.",
                 )
             })?
     };
 
-    let kokoro_dir = if let Some(ref dir) = app_data_dir {
-        Some(dir.join("models").join("kokoro"))
+    // Resolve Kokoro models: prefer an already-provisioned per-user copy, then
+    // the read-only models bundled in the installer, and only fall back to a
+    // network download when neither is present. (Previously the bundled copy
+    // was ignored, so every first run re-downloaded ~88 MB.)
+    let app_kokoro = app_data_dir.as_ref().map(|d| d.join("models").join("kokoro"));
+    let bundled_kokoro = resource_dir_for_models
+        .as_ref()
+        .map(|d| d.join("models").join("kokoro"));
+
+    let resolved_kokoro: Option<PathBuf> = if let Some(ref d) = app_kokoro {
+        if kokoro_models_present(d) {
+            Some(d.clone())
+        } else if bundled_kokoro.as_deref().is_some_and(kokoro_models_present) {
+            bundled_kokoro.clone()
+        } else {
+            // Nothing cached or bundled — download into the per-user dir. The
+            // downloader self-limits (KURAL_DOWNLOAD_TIMEOUT_S) so a stalled
+            // mirror can no longer hang startup forever.
+            if let Err(err) = ensure_kokoro_models(&backend_dir, d, &python) {
+                eprintln!("kural: model provisioning failed: {err}");
+            }
+            kokoro_models_present(d).then(|| d.clone())
+        }
+    } else if bundled_kokoro.as_deref().is_some_and(kokoro_models_present) {
+        bundled_kokoro.clone()
     } else {
         None
     };
-
-    if let Some(ref kokoro_dir) = kokoro_dir {
-        if let Err(err) = ensure_kokoro_models(&backend_dir, kokoro_dir, &python) {
-            eprintln!("kural: model provisioning failed: {err}");
-        }
-    }
 
     let mut command = Command::new(&python);
     command
@@ -248,23 +257,11 @@ fn start_backend(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    if let Some(ref kokoro_dir) = kokoro_dir {
-        if kokoro_dir.join("kokoro-v1.0.int8.onnx").exists()
-            && kokoro_dir.join("voices-v1.0.bin").exists()
-        {
-            command.env("MODEL_CACHE_DIR", kokoro_dir);
-        }
+    if let Some(ref dir) = resolved_kokoro {
+        command.env("MODEL_CACHE_DIR", dir);
     }
 
     if let Some(dir) = resource_dir_for_models {
-        let bundled_kokoro = dir.join("models").join("kokoro");
-        if kokoro_dir.is_none()
-            && bundled_kokoro.join("kokoro-v1.0.int8.onnx").exists()
-            && bundled_kokoro.join("voices-v1.0.bin").exists()
-        {
-            command.env("MODEL_CACHE_DIR", bundled_kokoro);
-        }
-
         let faster_whisper_dir = dir.join("models").join("asr").join("faster-whisper-tiny");
         if faster_whisper_dir.exists() {
             command.env("FASTER_WHISPER_MODEL_DIR", faster_whisper_dir);
@@ -743,7 +740,6 @@ fn main() {
                 .build(),
         )
         .setup(|app| {
-            let port = find_free_port();
             let resource_dir = app.path().resource_dir().ok();
             let app_data_dir = app.path().app_data_dir().ok();
 
@@ -758,19 +754,34 @@ fn main() {
                 })
                 .unwrap_or_default();
 
-            let (child_opt, backend_error) = match start_backend(port, &api_key, resource_dir, app_data_dir.clone()) {
-                Ok(mut child) => match wait_for_backend(port, &mut child, Duration::from_secs(15)) {
-                    Ok(()) => (Some(child), None),
+            // Allocating a port can fail on a locked-down host. Don't panic with
+            // no window — degrade to a port-less state and surface the reason in
+            // the same banner the frontend already renders for backend failures.
+            let (port, port_error) = match find_free_port() {
+                Ok(p) => (p, None),
+                Err(e) => {
+                    eprintln!("kural: could not allocate a local port: {e}");
+                    (0, Some(format!("Could not allocate a local port: {e}")))
+                }
+            };
+
+            let (child_opt, backend_error) = if let Some(err) = port_error {
+                (None, Some(err))
+            } else {
+                match start_backend(port, &api_key, resource_dir, app_data_dir.clone()) {
+                    Ok(mut child) => match wait_for_backend(port, &mut child, Duration::from_secs(15)) {
+                        Ok(()) => (Some(child), None),
+                        Err(e) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            eprintln!("kural: backend health check failed: {e}");
+                            (None, Some(e.to_string()))
+                        }
+                    },
                     Err(e) => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        eprintln!("kural: backend health check failed: {e}");
+                        eprintln!("kural: backend start failed: {e}");
                         (None, Some(e.to_string()))
                     }
-                },
-                Err(e) => {
-                    eprintln!("kural: backend start failed: {e}");
-                    (None, Some(e.to_string()))
                 }
             };
             app.manage(BackendProcess(Mutex::new(child_opt)));
@@ -779,12 +790,19 @@ fn main() {
             app.manage(BackendStartupError(Mutex::new(backend_error.clone())));
             app.manage(RuntimePaths { app_data_dir });
 
-            // App menu (macOS menu bar; also used on Linux/Windows)
-            let menu = build_menu(app.handle())?;
-            app.set_menu(menu)?;
-
-            // System tray
-            build_tray(app.handle())?;
+            // App menu and tray are convenience surfaces — a failure here (rare,
+            // e.g. a platform quirk) must not abort launch with no window.
+            match build_menu(app.handle()) {
+                Ok(menu) => {
+                    if let Err(err) = app.set_menu(menu) {
+                        eprintln!("kural: failed to set app menu: {err}");
+                    }
+                }
+                Err(err) => eprintln!("kural: failed to build app menu: {err}"),
+            }
+            if let Err(err) = build_tray(app.handle()) {
+                eprintln!("kural: failed to build system tray: {err}");
+            }
 
             // Main window — port is injected before any page JS runs
             let win = tauri::WebviewWindowBuilder::new(
@@ -803,7 +821,17 @@ fn main() {
             .title("Kural TTS")
             .inner_size(1100.0, 700.0)
             .resizable(true)
-            .build()?;
+            .build();
+            let win = match win {
+                Ok(win) => win,
+                Err(err) => {
+                    // The main window is the one genuinely unrecoverable failure
+                    // (there is nothing to show). Log a clear reason rather than
+                    // a bare panic, then let setup return the error.
+                    eprintln!("kural: failed to create the main window: {err}");
+                    return Err(err.into());
+                }
+            };
 
             // Hide to tray on close instead of quitting
             let win_clone = win.clone();
@@ -842,16 +870,23 @@ fn main() {
             .always_on_top(true)
             .skip_taskbar(true)
             .visible(false)
-            .build()?;
+            .build();
 
-            // Closing the widget just hides it — the shortcut re-summons it.
-            let dictation_clone = dictation.clone();
-            dictation.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    let _ = dictation_clone.hide();
-                    api.prevent_close();
+            // The dictation widget is optional — if it fails to build, the main
+            // app still runs (the tray/shortcut just can't summon it).
+            match dictation {
+                Ok(dictation) => {
+                    // Closing the widget just hides it — the shortcut re-summons it.
+                    let dictation_clone = dictation.clone();
+                    dictation.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            let _ = dictation_clone.hide();
+                            api.prevent_close();
+                        }
+                    });
                 }
-            });
+                Err(err) => eprintln!("kural: failed to create the dictation widget: {err}"),
+            }
 
             // Global shortcut to summon the widget. A failure here — e.g. the
             // accelerator is already claimed by another app — is non-fatal:
@@ -881,5 +916,8 @@ fn main() {
             dictation_paste
         ])
         .run(tauri::generate_context!())
-        .expect("error while running kural");
+        .unwrap_or_else(|err| {
+            eprintln!("kural: fatal error while running: {err}");
+            std::process::exit(1);
+        });
 }

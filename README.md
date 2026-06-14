@@ -6,7 +6,7 @@ Privacy-first, cross-platform AI text-to-speech and dictation workstation. Runs 
 
 - **Kokoro TTS** (Apache 2.0): high-quality neural TTS with multiple voices
 - **Chatterbox TTS** (MIT): expressive synthesis with voice cloning support
-- **Supertonic TTS** (MIT): compact ONNX model with native multilingual synthesis (Supertone Inc. open weights, English/Hindi/Japanese/German/French/Spanish exposed initially)
+- **Supertonic TTS** (MIT): compact ONNX model with native multilingual synthesis (Supertone Inc. open weights; all 31 `supertonic-3` languages are surfaced as `st_`-prefixed voices)
 
 ## Optional Local Multilingual Packs
 

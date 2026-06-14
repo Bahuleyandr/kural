@@ -97,3 +97,26 @@ def test_provenance_sidecar_shape():
     assert payload["local_only"] is True
     assert payload["payload"]["project"]["id"] == "project-1"
     assert payload["payload"]["watermark"]["enabled"] is True
+
+
+def test_lip_sync_check_configured_but_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "lip_sync_binary", str(tmp_path / "missing-lipsync"))
+
+    res = TestClient(app).get("/api/runtime/health-checks")
+
+    assert res.status_code == 200
+    checks = {check["id"]: check for check in res.json()["checks"]}
+    lip_sync = checks["lip-sync"]
+    assert lip_sync["status"] == "missing"
+    # Previously a configured-but-missing binary left repair_action=None, so the
+    # UI showed "missing" with no guidance. It must now offer manual setup.
+    assert lip_sync["repair_action"] == "configure_lip_sync_binary"
+
+
+def test_repair_rejects_empty_clone_dir(monkeypatch):
+    monkeypatch.setattr(settings, "clone_cache_dir", "")
+
+    res = TestClient(app).post("/api/runtime/repair", json={"action": "create_clone_folder"})
+
+    assert res.status_code == 400
+    assert res.json()["detail"]["code"] == "unsafe_repair_path"

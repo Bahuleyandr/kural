@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AudioLibrary } from "../app/components/AudioLibrary";
@@ -536,6 +536,69 @@ describe("ReleaseDiagnosticsPanel", () => {
     );
     expect(await screen.findByText(/created local voice clone storage/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create folder/i })).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it("polls setup status and shows progress after Kokoro provisioning starts", async () => {
+    const user = userEvent.setup();
+    const json = (body: unknown, status = 200) =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    const missingKokoro = {
+      status: "needs_setup",
+      checks: [
+        {
+          id: "kokoro-models",
+          label: "Kokoro model files",
+          status: "missing",
+          detail: "/models/kokoro",
+          repair_action: "provision_kokoro",
+        },
+      ],
+      storage: { model_pack_root: "/models", model_files_sampled: 0 },
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/runtime/health-checks")) return json(missingKokoro);
+      if (url.endsWith("/api/runtime/repair") && init?.method === "POST") {
+        return json(
+          {
+            action: "provision_kokoro",
+            status: "started",
+            message: "Started Kokoro model provisioning.",
+            runtime: missingKokoro,
+          },
+          202
+        );
+      }
+      if (url.endsWith("/api/setup/status")) {
+        return json({
+          kokoro_ready: false,
+          model_dir: "/models/kokoro",
+          model_files: [],
+          provision_status: "running",
+          provision_detail: null,
+        });
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReleaseDiagnosticsPanel apiUrl="http://backend" backendStatus={null} backendError={null} />);
+    await user.click(await screen.findByRole("button", { name: /install models/i }));
+
+    // Provisioning runs in the background, so the panel must poll setup status
+    // and reflect progress instead of leaving the check stuck on "missing".
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/setup/status"))
+      ).toBe(true)
+    );
+    expect(await screen.findByRole("button", { name: /installing/i })).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
 });

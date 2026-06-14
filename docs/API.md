@@ -8,6 +8,29 @@ Backend base URL defaults to `http://localhost:8000`.
 curl http://localhost:8000/api/health
 ```
 
+`/api/health` and `/healthz` are unauthenticated so a container or orchestrator can probe liveness regardless of API-key configuration.
+
+## Authentication
+
+The API is unauthenticated by default for the single-user offline workflow. Set a shared secret to require an `X-API-Key` header on every other `/api/*` request:
+
+```bash
+# Either name binds; the KURAL_-prefixed form is preferred, the bare API_KEY is a legacy alias.
+export KURAL_API_KEY=$(openssl rand -hex 32)
+curl http://localhost:8000/api/voices -H "X-API-Key: $KURAL_API_KEY"
+```
+
+The desktop app provisions a per-install key automatically. The WebSocket streaming route accepts the key as either the `X-API-Key` header or an `?api_key=` query parameter (browser sockets cannot set headers).
+
+## First-Run Setup
+
+```bash
+curl http://localhost:8000/api/setup/status
+curl -X POST http://localhost:8000/api/setup/provision-models
+```
+
+`/api/setup/status` reports whether the Kokoro weights are present, the resolved model directory, and `provision_status` (`idle`, `running`, `complete`, `error`). `POST /api/setup/provision-models` starts a background download (returns `202`; a second concurrent call returns `409`). The first-run wizard and Settings → Desktop Release Diagnostics poll these.
+
 ## Voices
 
 ```bash
@@ -73,6 +96,12 @@ curl -X POST http://localhost:8000/api/synthesize \
 ```
 
 Use `"format":"mp3"` for Kokoro MP3 export when `ffmpeg` is installed. Cloned voices always return WAV.
+
+For low-latency playback, `GET /api/synthesize/stream` streams WAV audio as it is generated. Parameters are passed as the query string:
+
+```bash
+curl "http://localhost:8000/api/synthesize/stream?text=Hello%20from%20Kural&voice=af_bella&speed=1.0" --output speech.wav
+```
 
 Advanced audio controls are optional. Top-level `speed` remains supported for older clients; when `controls.speed` is present it is used for synthesis speed.
 
@@ -152,6 +181,8 @@ curl -X POST http://localhost:8000/api/transcribe \
 ```
 
 Optional adapter dependencies live in `backend/requirements-local-models.txt`. Kural does not include or download ASR/translation model weights in the default package.
+
+For live dictation, `WS /api/transcribe/stream` accepts streamed little-endian PCM16 mono audio (optional `?language=` / `?sample_rate=` query params, default 16000 Hz) and returns incremental `{"type":"partial"|"final","text":...}` JSON frames. Streaming is Vosk-backed; if Vosk isn't configured the socket emits one `{"type":"error"}` frame and closes so the client can fall back to batch `/api/transcribe`. Authenticate with the `X-API-Key` header or an `?api_key=` query parameter.
 
 Rendered dubbing segments can be aligned against expected text and slot duration:
 
@@ -252,6 +283,20 @@ Import a Kural voice archive:
 curl -X POST http://localhost:8000/api/voices/clones/import \
   -F "file=@kural-voices.zip"
 ```
+
+## Telemetry
+
+Telemetry is opt-in and ships nothing by default. Both `KURAL_TELEMETRY_OPT_IN=true` and `KURAL_TELEMETRY_ENDPOINT=<url>` must be set before any event leaves the machine.
+
+```bash
+curl -X POST http://localhost:8000/api/telemetry \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"ui_error","message":"example","extra":{}}'
+```
+
+The endpoint always returns `202` with `{"accepted":true,"forwarded":<bool>}`. When telemetry is disabled (the default) `forwarded` is `false` and the event is dropped locally.
+
+## Errors
 
 Error responses use FastAPI's standard JSON shape with a structured `detail` object:
 
