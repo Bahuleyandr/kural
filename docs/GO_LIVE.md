@@ -13,15 +13,23 @@ order, with copy-paste commands.
 - python-build-standalone provisions end-to-end — downloads the pinned
   `cpython-3.12.8+20241219`, extracts it, and pip-installs the whole backend
   (numpy/scipy/onnxruntime/soundfile/kokoro-onnx/…) into `desktop/runtime/python`.
-- the **bundled `python.exe` boots the FastAPI backend and serves**: `/healthz`
-  200, `/api/health` → `ok v0.2.0`, `/api/runtime/health-checks` → 200.
-- the desktop static export (`build:desktop`) emits Tauri-ready relative-URL
-  `index.html` **and** `dictation.html` (no absolute `/_next`).
+- **the full installer builds** — `build_desktop.py installer --without-clone`
+  produces `Kural_0.2.0_x64-setup.exe` (NSIS, 171 MB) and
+  `Kural_0.2.0_x64_en-US.msi` (238 MB); the bundle embeds the Python runtime,
+  backend, and Kokoro models (verified next to the binary).
+- **the as-shipped bundle boots** — running the *bundled* `python.exe` on the
+  *bundled* backend reports `kokoro-models: ready` **from the bundled models**
+  (first run is offline, no download — validates the model-seeding fix),
+  `/healthz` 200, `/api/health` → `ok v0.2.0`.
+- the desktop static export is Tauri-ready (relative `/_next`, incl.
+  `dictation.html`).
 
-So the relocatable-runtime risk (the big one) is largely retired.
+So the build + bundle + runtime risks are retired. The installers to copy onto a
+test VM are at
+`desktop/src-tauri/target/release/bundle/{nsis,msi}/Kural_0.2.0_x64*`.
 
-**Still needs a clean VM** (this box has system Python and no display for the
-GUI). On a fresh Windows VM with **no Python on PATH**, confirm:
+**Still needs a clean VM** (this box has system Python + ffmpeg and no display
+for the GUI). On a fresh Windows VM with **no Python on PATH**, confirm:
 
 ```powershell
 # On a dev box with the toolchains (Python 3.12, Node 22, Rust, pnpm):
