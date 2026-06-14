@@ -2,13 +2,30 @@
 
 This script intentionally installs model files only; Python package installation
 stays explicit via requirements-local-models.txt.
+
+Integrity posture:
+- Faster-Whisper is pulled from the Hugging Face hub, which is content-addressed
+  (huggingface_hub verifies each blob's hash). We additionally pin the model
+  *revision* (commit SHA) so the download is reproducible and locked to a
+  known-good tree (KURAL_WHISPER_REVISION overrides).
+- Argos packages are fetched over HTTPS via argostranslate's package index;
+  the library exposes no per-file pin hook, so integrity rests on TLS + the
+  official index.
+- All network reads honour KURAL_DOWNLOAD_TIMEOUT_S so a stalled mirror fails
+  fast instead of hanging a build.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import socket
 from pathlib import Path
+
+# Pinned commit of Systran/faster-whisper-tiny on the HF hub (override with
+# KURAL_WHISPER_REVISION). Pinning the revision makes the download reproducible
+# and locks it to a known-good, hash-verified tree.
+_DEFAULT_WHISPER_REVISION = "d90ca5fe260221311c53c58e660288d3deb8d356"
 
 
 DEFAULT_ARGOS_PAIRS = [
@@ -31,7 +48,7 @@ def _pair(value: str) -> tuple[str, str]:
     return source, target
 
 
-def _download_faster_whisper(repo_id: str, target: Path) -> Path:
+def _download_faster_whisper(repo_id: str, target: Path, revision: str | None = None) -> Path:
     try:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
@@ -40,7 +57,7 @@ def _download_faster_whisper(repo_id: str, target: Path) -> Path:
         ) from exc
 
     target.mkdir(parents=True, exist_ok=True)
-    return Path(snapshot_download(repo_id=repo_id, local_dir=str(target)))
+    return Path(snapshot_download(repo_id=repo_id, local_dir=str(target), revision=revision))
 
 
 def _install_argos_pairs(pairs: list[tuple[str, str]], package_dir: Path) -> list[str]:
@@ -90,19 +107,27 @@ def main() -> int:
         help="Do not download a faster-whisper model.",
     )
     parser.add_argument(
+        "--whisper-revision",
+        default=os.environ.get("KURAL_WHISPER_REVISION", _DEFAULT_WHISPER_REVISION),
+        help="HF commit/revision to pin the faster-whisper download to.",
+    )
+    parser.add_argument(
         "--argos-pair",
         action="append",
         type=_pair,
         help="Argos package pair to install, for example en:hi. Can be repeated.",
     )
     args = parser.parse_args()
+    # Bound every network read (HF snapshot + Argos index/package) so a stalled
+    # mirror fails fast instead of hanging the provisioner.
+    socket.setdefaulttimeout(int(os.environ.get("KURAL_DOWNLOAD_TIMEOUT_S", "300")))
 
     root = Path(args.root).expanduser()
     whisper_target = root / "asr" / Path(args.whisper_repo).name
     argos_target = root / "translation" / "argos" / "packages"
 
     if not args.skip_whisper:
-        path = _download_faster_whisper(args.whisper_repo, whisper_target)
+        path = _download_faster_whisper(args.whisper_repo, whisper_target, args.whisper_revision)
         print(f"FASTER_WHISPER_MODEL_DIR={path}")
 
     pairs = args.argos_pair or [_pair(value) for value in DEFAULT_ARGOS_PAIRS]

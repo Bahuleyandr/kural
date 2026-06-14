@@ -16,15 +16,13 @@ import {
 const SAMPLE_RATE = 16000;
 
 function invokeTauri(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
-  const tauri = (
-    window as unknown as {
-      __TAURI__?: {
-        invoke?: (c: string, a?: Record<string, unknown>) => Promise<unknown>;
-        core?: { invoke?: (c: string, a?: Record<string, unknown>) => Promise<unknown> };
-      };
-    }
-  ).__TAURI__;
-  const invoke = tauri?.invoke ?? tauri?.core?.invoke;
+  type InvokeFn = (c: string, a?: Record<string, unknown>) => Promise<unknown>;
+  const w = window as unknown as {
+    __TAURI_INTERNALS__?: { invoke?: InvokeFn };
+    __TAURI__?: { invoke?: InvokeFn; core?: { invoke?: InvokeFn } };
+  };
+  // Tauri v2 injects __TAURI_INTERNALS__.invoke regardless of withGlobalTauri.
+  const invoke = w.__TAURI_INTERNALS__?.invoke ?? w.__TAURI__?.invoke ?? w.__TAURI__?.core?.invoke;
   if (!invoke) return Promise.reject(new Error("Tauri IPC unavailable"));
   return invoke(cmd, args);
 }

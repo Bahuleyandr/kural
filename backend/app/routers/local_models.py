@@ -255,6 +255,12 @@ async def mux_dubbed_video(
         )
 
 
+# Number of in-flight dictation streams (capped by
+# settings.transcribe_stream_max_concurrent). Mutated only from the asyncio
+# event loop, so a plain int is safe.
+_active_streams = 0
+
+
 @stream_router.websocket("/transcribe/stream")
 async def transcribe_stream(websocket: WebSocket) -> None:
     """Incremental speech-to-text over WebSocket, backed by Vosk.
@@ -289,51 +295,61 @@ async def transcribe_stream(websocket: WebSocket) -> None:
         await websocket.close(code=1008)  # policy violation
         return
 
-    await websocket.accept()
-
-    language = websocket.query_params.get("language") or None
-    try:
-        sample_rate = int(websocket.query_params.get("sample_rate", "16000"))
-    except ValueError:
-        sample_rate = 16000
-
-    try:
-        transcriber = StreamingTranscriber(language=language, sample_rate=sample_rate)
-    except LocalModelUnavailable as exc:
-        await websocket.send_json(
-            {"type": "error", "code": "local_asr_unavailable", "message": str(exc)}
-        )
-        await websocket.close(code=1011)
+    # Cap concurrent streams so one client can't exhaust the executor / memory
+    # by opening many sockets. Reject early (before accept) with 1013 "try again
+    # later" rather than accepting and immediately tearing down.
+    global _active_streams
+    if _active_streams >= settings.transcribe_stream_max_concurrent:
+        await websocket.close(code=1013)
         return
 
-    loop = asyncio.get_running_loop()
+    await websocket.accept()
+    _active_streams += 1
     try:
-        while True:
-            message = await websocket.receive()
-            if message["type"] == "websocket.disconnect":
-                break
+        language = websocket.query_params.get("language") or None
+        try:
+            sample_rate = int(websocket.query_params.get("sample_rate", "16000"))
+        except ValueError:
+            sample_rate = 16000
 
-            chunk = message.get("bytes")
-            if chunk is not None:
-                if not chunk:
-                    continue
-                result = await loop.run_in_executor(_executor, transcriber.accept, chunk)
-                await websocket.send_json(result)
-                continue
+        try:
+            transcriber = StreamingTranscriber(language=language, sample_rate=sample_rate)
+        except LocalModelUnavailable as exc:
+            await websocket.send_json(
+                {"type": "error", "code": "local_asr_unavailable", "message": str(exc)}
+            )
+            await websocket.close(code=1011)
+            return
 
-            text = message.get("text")
-            if text is not None:
-                try:
-                    payload = json.loads(text)
-                except ValueError:
-                    continue
-                if payload.get("type") == "done":
-                    final = await loop.run_in_executor(_executor, transcriber.finalize)
-                    await websocket.send_json(final)
+        loop = asyncio.get_running_loop()
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
                     break
-    except WebSocketDisconnect:
-        pass
+
+                chunk = message.get("bytes")
+                if chunk is not None:
+                    if not chunk:
+                        continue
+                    result = await loop.run_in_executor(_executor, transcriber.accept, chunk)
+                    await websocket.send_json(result)
+                    continue
+
+                text = message.get("text")
+                if text is not None:
+                    try:
+                        payload = json.loads(text)
+                    except ValueError:
+                        continue
+                    if payload.get("type") == "done":
+                        final = await loop.run_in_executor(_executor, transcriber.finalize)
+                        await websocket.send_json(final)
+                        break
+        except WebSocketDisconnect:
+            pass
     finally:
+        _active_streams -= 1
         # The client may already be gone (disconnect); closing twice is
         # harmless but can raise, so swallow it.
         try:

@@ -167,7 +167,9 @@ class MarketplaceValidationIssue(BaseModel):
 class MarketplaceValidationResponse(BaseModel):
     accepted: bool
     installable: bool
-    trust_level: Literal["verified", "review_required", "blocked"]
+    # "signed" means a signature is present and there are no blocking errors —
+    # NOT that Kural cryptographically verified it (it does not, yet).
+    trust_level: Literal["signed", "review_required", "blocked"]
     score: int = Field(..., ge=0, le=100)
     manifest_digest: str
     errors: list[MarketplaceValidationIssue] = Field(default_factory=list)

@@ -14,15 +14,23 @@ export function getApiKey(): string {
   return injected || process.env.NEXT_PUBLIC_KURAL_API_KEY || "";
 }
 
+type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+
 interface TauriGlobal {
-  invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-  core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
+  invoke?: InvokeFn;
+  core?: { invoke?: InvokeFn };
 }
 
-function getTauriInvoke(): TauriGlobal["invoke"] {
+function getTauriInvoke(): InvokeFn | undefined {
   if (typeof window === "undefined") return undefined;
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  return tauri?.invoke ?? tauri?.core?.invoke;
+  const w = window as unknown as {
+    __TAURI_INTERNALS__?: { invoke?: InvokeFn };
+    __TAURI__?: TauriGlobal;
+  };
+  // Tauri v2 always injects __TAURI_INTERNALS__.invoke, even with
+  // withGlobalTauri:false (which removes the broad window.__TAURI__ API that
+  // injected script could otherwise lever). Fall back to the global if present.
+  return w.__TAURI_INTERNALS__?.invoke ?? w.__TAURI__?.invoke ?? w.__TAURI__?.core?.invoke;
 }
 
 export interface DesktopDiagnostics {

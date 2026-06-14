@@ -105,7 +105,7 @@ jobs:
       - name: Check release helper scripts
         run: |
           python -m compileall desktop/scripts
-          KURAL_UPDATER_PUBLIC_KEY=test-public-key python desktop/scripts/render-release-config.py --output /tmp/kural-release-test.json
+          KURAL_UPDATER_PUBLIC_KEY=$(python -c "import base64;print(base64.b64encode(b'kural-ci-render-only-key-0000000000000000').decode())") python desktop/scripts/render-release-config.py --output /tmp/kural-release-test.json
           mkdir -p /tmp/kural-artifacts
           printf artifact > /tmp/kural-artifacts/Kural.AppImage
           printf signature > /tmp/kural-artifacts/Kural.AppImage.sig
