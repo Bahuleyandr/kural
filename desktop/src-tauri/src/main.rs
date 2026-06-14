@@ -622,10 +622,32 @@ fn dictation_paste(app: tauri::AppHandle, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn reveal_path(path: String) -> Result<(), String> {
-    let target = PathBuf::from(path);
+fn reveal_path(paths: tauri::State<RuntimePaths>, path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
     if !target.exists() {
         return Err("Saved file no longer exists.".to_string());
+    }
+    // Containment: a reveal target must sit under one of Kural's own folders.
+    // Without this, any page JS could `explorer /select` an arbitrary path.
+    let canonical = target
+        .canonicalize()
+        .map_err(|err| format!("Invalid path: {err}"))?;
+    let mut allowed: Vec<PathBuf> = Vec::new();
+    if let Ok(audio) = default_audio_library_dir() {
+        allowed.push(audio);
+    }
+    if let Some(ref app_data) = paths.app_data_dir {
+        allowed.push(app_data.clone());
+        allowed.push(default_project_vault_dir(app_data));
+        allowed.push(default_logs_dir(app_data));
+    }
+    let within = allowed.iter().any(|root| {
+        root.canonicalize()
+            .map(|resolved| canonical.starts_with(&resolved))
+            .unwrap_or(false)
+    });
+    if !within {
+        return Err("Refusing to reveal a path outside Kural's folders.".to_string());
     }
 
     open_path_in_file_manager(&target, true)
