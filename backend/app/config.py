@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     local_asr_engine: str = "auto"
     local_translation_engine: str = "auto"
     transcribe_max_upload_mb: int = 250
+    # Cap on concurrent /api/transcribe/stream WebSocket sessions (DoS guard).
+    transcribe_stream_max_concurrent: int = 4
     faster_whisper_model_dir: str = "~/.cache/kural/asr/faster-whisper"
     vosk_model_dir: str = "~/.cache/kural/asr/vosk"
     whisper_cpp_binary: str = ""

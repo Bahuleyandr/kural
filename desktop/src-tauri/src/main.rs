@@ -409,15 +409,28 @@ fn get_runtime_diagnostics(
     }
 }
 
+/// Reject privileged commands invoked from the frameless dictation widget — it
+/// only needs dictation_paste / get_api_key / get_backend_url. This stops the
+/// always-on-top widget (or injected script in it) from being a lever for file
+/// writes, path reveals, or engine restarts.
+fn deny_from_dictation(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "dictation" {
+        return Err("This action is not available from the dictation widget.".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn restart_backend(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     process: tauri::State<BackendProcess>,
     port: tauri::State<BackendPort>,
     key: tauri::State<BackendApiKey>,
     startup_error: tauri::State<BackendStartupError>,
     paths: tauri::State<RuntimePaths>,
 ) -> Result<(), String> {
+    deny_from_dictation(&window)?;
     kill_backend(&app);
     let resource_dir = app.path().resource_dir().ok();
     let app_data_dir = paths.app_data_dir.clone();
@@ -441,7 +454,11 @@ fn restart_backend(
 }
 
 #[tauri::command]
-fn open_logs_folder(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
+fn open_logs_folder(
+    window: tauri::WebviewWindow,
+    paths: tauri::State<RuntimePaths>,
+) -> Result<(), String> {
+    deny_from_dictation(&window)?;
     let app_data_dir = paths
         .app_data_dir
         .as_ref()
@@ -452,7 +469,11 @@ fn open_logs_folder(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_project_vault(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
+fn open_project_vault(
+    window: tauri::WebviewWindow,
+    paths: tauri::State<RuntimePaths>,
+) -> Result<(), String> {
+    deny_from_dictation(&window)?;
     let app_data_dir = paths
         .app_data_dir
         .as_ref()
@@ -465,10 +486,12 @@ fn open_project_vault(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
 
 #[tauri::command(rename_all = "camelCase")]
 fn save_project_archive(
+    window: tauri::WebviewWindow,
     paths: tauri::State<RuntimePaths>,
     file_name: String,
     bytes: Vec<u8>,
 ) -> Result<String, String> {
+    deny_from_dictation(&window)?;
     if bytes.is_empty() {
         return Err("Project archive is empty.".to_string());
     }
@@ -497,7 +520,11 @@ fn save_project_archive(
 }
 
 #[tauri::command]
-fn clear_setup_state(paths: tauri::State<RuntimePaths>) -> Result<(), String> {
+fn clear_setup_state(
+    window: tauri::WebviewWindow,
+    paths: tauri::State<RuntimePaths>,
+) -> Result<(), String> {
+    deny_from_dictation(&window)?;
     let app_data_dir = paths
         .app_data_dir
         .as_ref()
@@ -584,7 +611,12 @@ fn unique_output_path(dir: &Path, file_name: &str) -> PathBuf {
 /// Save a generated clip to a predictable local folder from the desktop app.
 /// The web build falls back to a browser download in the frontend.
 #[tauri::command(rename_all = "camelCase")]
-fn save_audio_file(file_name: String, bytes: Vec<u8>) -> Result<String, String> {
+fn save_audio_file(
+    window: tauri::WebviewWindow,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    deny_from_dictation(&window)?;
     if bytes.is_empty() {
         return Err("Audio file is empty.".to_string());
     }
@@ -622,7 +654,12 @@ fn dictation_paste(app: tauri::AppHandle, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn reveal_path(paths: tauri::State<RuntimePaths>, path: String) -> Result<(), String> {
+fn reveal_path(
+    window: tauri::WebviewWindow,
+    paths: tauri::State<RuntimePaths>,
+    path: String,
+) -> Result<(), String> {
+    deny_from_dictation(&window)?;
     let target = PathBuf::from(&path);
     if !target.exists() {
         return Err("Saved file no longer exists.".to_string());

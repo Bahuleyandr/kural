@@ -152,7 +152,7 @@ export interface MarketplaceValidationIssue {
 export interface MarketplaceValidationResponse {
   accepted: boolean;
   installable: boolean;
-  trust_level: "verified" | "review_required" | "blocked";
+  trust_level: "signed" | "review_required" | "blocked";
   score: number;
   manifest_digest: string;
   errors: MarketplaceValidationIssue[];

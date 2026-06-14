@@ -748,8 +748,11 @@ def validate_marketplace_manifest(
     if manifest.consent_proof:
         base_score += 4
     score = max(0, min(100, base_score))
+    # "signed" = a signature string is present and there are no blocking errors.
+    # Kural does NOT yet cryptographically verify the signature, so the label is
+    # deliberately "signed", not "verified" — it must not over-promise trust.
     installable = not errors and bool(manifest.signature)
-    trust_level = "verified" if installable else "blocked" if errors else "review_required"
+    trust_level = "signed" if installable else "blocked" if errors else "review_required"
     return MarketplaceValidationResponse(
         accepted=not errors,
         installable=installable,

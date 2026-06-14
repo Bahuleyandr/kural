@@ -161,6 +161,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--include-playwright", action="store_true", help="Run frontend Playwright smoke tests.")
     parser.add_argument("--include-docker", action="store_true", help="Build and boot docker-compose.yml.")
+    parser.add_argument(
+        "--include-integration",
+        action="store_true",
+        help="Run the real Kokoro inference smoke (requires Kokoro models present).",
+    )
     parser.add_argument("--skip-desktop", action="store_true", help="Skip desktop Cargo/release-config checks.")
     args = parser.parse_args()
 
@@ -176,6 +181,16 @@ def main() -> int:
 
     if args.include_playwright:
         steps.append(Step("Frontend Playwright smoke", [*PNPM, "run", "test:e2e"], REPO_ROOT / "frontend"))
+
+    if args.include_integration:
+        steps.append(
+            Step(
+                "Backend Kokoro integration",
+                [sys.executable, "-m", "pytest", "tests/test_engine_integration.py", "-k", "not supertonic", "-q"],
+                REPO_ROOT / "backend",
+                env={"KURAL_RUN_INTEGRATION": "1"},
+            )
+        )
 
     for step in steps:
         run_step(step)

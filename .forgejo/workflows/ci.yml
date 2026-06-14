@@ -1,0 +1,57 @@
+name: CI
+
+# Forgejo Actions. GitHub Actions is billing-blocked on this account, so this
+# self-hosted Forgejo workflow is the authoritative CI. It runs the SAME local
+# release gate developers run (scripts/rc1_release_gate.py) so CI and local can
+# never diverge — the gate is the single source of truth.
+#
+# When this `.forgejo/workflows/` directory exists, Forgejo runs it and ignores
+# `.github/workflows/` (which is kept for if/when GitHub Actions billing is
+# restored).
+#
+# Runner: register a Forgejo runner that can provide python3.12, node 22, rust,
+# and apt (e.g. a docker-backed `ubuntu-latest` label):
+#   # on the Forgejo server, mint a registration token, then on the runner host:
+#   forgejo-runner register \
+#     --instance https://forgejo.hippocampus-monitor.ts.net \
+#     --token <token> \
+#     --labels ubuntu-latest:docker://node:22-bookworm
+#   forgejo-runner daemon
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsndfile1 ffmpeg espeak-ng \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libssl-dev build-essential
+      - name: Install Python packages (backend, CLI, MCP)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e backend -r backend/requirements-dev.txt
+          pip install -e cli
+          pip install -e "mcp[dev]"
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Run RC1 release gate
+        # backend/cli/mcp pytest + frontend lint/test/build + desktop
+        # compileall/render/smoke/cargo check. Uses an ephemeral updater key
+        # internally, so no secrets are required for the gate.
+        run: python scripts/rc1_release_gate.py
