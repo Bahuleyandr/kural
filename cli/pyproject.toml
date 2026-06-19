@@ -9,7 +9,7 @@ description = "Privacy-first text-to-speech CLI powered by Kural"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
-    "httpx>=0.27",
+    "httpx>=0.28.1",
     "rich>=13",
 ]
 
