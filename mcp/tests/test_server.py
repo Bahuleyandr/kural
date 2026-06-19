@@ -62,6 +62,15 @@ def fake(monkeypatch):
     return client
 
 
+@pytest.fixture(autouse=True)
+def confined_output(monkeypatch, tmp_path):
+    """Point MCP output at a per-test dir so writes are confined and don't
+    touch the real ~/.cache, and return it for tests that assert on output."""
+    out_dir = tmp_path / "mcp-out"
+    monkeypatch.setenv("KURAL_MCP_OUTPUT_DIR", str(out_dir))
+    return out_dir
+
+
 def test_list_voices_unfiltered(fake):
     voices = server.list_voices()
     assert {v["id"] for v in voices} == {"af_bella", "st_m1_hi", "st_m1_en"}
@@ -139,10 +148,10 @@ def test_inspect_project_archive_summarizes_manifest(fake, tmp_path):
     assert summary["pronunciation_profiles"] == 1
 
 
-def test_synthesize_writes_file_and_reports_path(fake, tmp_path):
-    out = tmp_path / "speech.wav"
-    result = server.synthesize("Hello there.", voice="st_m1_en", output_path=str(out))
+def test_synthesize_writes_file_and_reports_path(fake, confined_output):
+    result = server.synthesize("Hello there.", voice="st_m1_en", output_path="speech.wav")
 
+    out = confined_output / "speech.wav"
     assert out.is_file()
     assert out.read_bytes()[:4] == b"RIFF"
     # The summary must name the resolved path so the MCP client can act on it.
@@ -163,16 +172,32 @@ def test_synthesize_rejects_bad_format(fake):
         server.synthesize("text", fmt="ogg")
 
 
-def test_synthesize_with_cloned_voice_routes_voice_id(fake, tmp_path):
-    out = tmp_path / "cloned.wav"
+def test_synthesize_with_cloned_voice_routes_voice_id(fake, confined_output):
     result = server.synthesize_with_cloned_voice(
-        "Cloned speech.", "clone-1", output_path=str(out)
+        "Cloned speech.", "clone-1", output_path="cloned.wav"
     )
+    out = confined_output / "cloned.wav"
     assert out.is_file()
     assert "clone-1" in result
     # Must go through the voice_id path, not the plain voice path.
     call = fake.calls[0]
     assert call[3] == "clone-1"  # voice_id positional in the fake signature
+
+
+def test_synthesize_rejects_path_outside_output_dir(fake, tmp_path):
+    # An absolute path outside the confined output dir must be refused — this is
+    # the write-anywhere primitive the confinement closes.
+    outside = tmp_path / "outside.wav"
+    with pytest.raises(KuralBackendError, match="must be a file inside"):
+        server.synthesize("Hi.", output_path=str(outside))
+    assert not outside.exists()
+
+
+def test_synthesize_rejects_traversal_escape(fake, confined_output):
+    # A relative `..` escape must not climb out of the output dir.
+    with pytest.raises(KuralBackendError, match="must be a file inside"):
+        server.synthesize("Hi.", output_path="../escape.wav")
+    assert not (confined_output.parent / "escape.wav").exists()
 
 
 def test_transcribe_passes_through(fake, tmp_path):

@@ -97,6 +97,12 @@ def _sha256(path: Path) -> str:
 
 def _verify_checksum(archive: Path, url: str) -> None:
     """Verify the archive against PBS's published ``<asset>.sha256`` when reachable."""
+    require = os.environ.get("KURAL_REQUIRE_RUNTIME_CHECKSUM", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "",
+    )
     try:
         request = urllib.request.Request(
             url + ".sha256", headers={"User-Agent": "kural-runtime-provisioner"}
@@ -104,8 +110,19 @@ def _verify_checksum(archive: Path, url: str) -> None:
         with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_S) as response:
             expected = response.read().decode("utf-8").split()[0].strip().lower()
     except OSError as exc:
+        # Fail closed by default: the bundled interpreter is the most
+        # security-critical download (it *is* the code-execution environment),
+        # so a fetch failure must not silently downgrade to "no verification".
+        if require:
+            archive.unlink(missing_ok=True)
+            raise SystemExit(
+                f"Could not fetch runtime checksum for verification ({exc}). "
+                "Refusing to use an unverified interpreter. Set "
+                "KURAL_REQUIRE_RUNTIME_CHECKSUM=0 to bypass (NOT recommended)."
+            ) from exc
         print(
-            f"  WARNING: could not fetch runtime checksum ({exc}); skipping verification.",
+            "  WARNING: could not fetch runtime checksum; skipping verification "
+            "(KURAL_REQUIRE_RUNTIME_CHECKSUM=0).",
             file=sys.stderr,
         )
         return
@@ -219,6 +236,25 @@ def main() -> int:
     for req in requirements:
         subprocess.run([str(python), "-m", "pip", "install", "-r", str(req)], check=True)
     if args.with_clone:
+        # Chatterbox needs PyTorch, which ships from a dedicated CPU index and is
+        # NOT listed in requirements-clone.txt (the CI installs it separately).
+        # Install it explicitly so the bundled clone runtime can actually import
+        # chatterbox at runtime instead of failing on `import torch`.
+        torch_spec = os.environ.get(
+            "KURAL_TORCH_SPEC", "torch==2.6.0+cpu torchaudio==2.6.0+cpu"
+        ).split()
+        subprocess.run(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                *torch_spec,
+                "--index-url",
+                "https://download.pytorch.org/whl/cpu",
+            ],
+            check=True,
+        )
         subprocess.run(
             [str(python), "-m", "pip", "install", "--no-deps", "chatterbox-tts==0.1.7"],
             check=True,

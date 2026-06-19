@@ -103,6 +103,16 @@ class Settings(BaseSettings):
     enable_nllb: bool = False
     nllb_model_dir: str = "~/.cache/kural/translation/nllb"
 
+    # Allow loading model directories with transformers `trust_remote_code=True`
+    # (executes arbitrary Python shipped inside the checkpoint). OFF by default:
+    # only enable if every configured model dir is fully trusted.
+    allow_remote_model_code: bool = Field(
+        default=False,
+        validation_alias=_kural_alias(
+            "KURAL_ALLOW_REMOTE_MODEL_CODE", "ALLOW_REMOTE_MODEL_CODE"
+        ),
+    )
+
     # Optional local agent and media tools. These are never launched from the
     # browser UI; Kural only probes or calls known local endpoints/binaries.
     ollama_url: str = Field(
