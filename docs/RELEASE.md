@@ -190,21 +190,34 @@ make lock          # needs `uv`; rewrites backend/requirements.lock
 Validated 2026-06-19: `pip install --require-hashes -r requirements.lock`
 succeeds in `python:3.11-slim` and the lite Docker image builds from it.
 
-**Not yet locked (follow-up):** the optional **clone** layer (torch from the
-PyTorch CPU index + `requirements-clone.txt` + `chatterbox-tts --no-deps`) and
-the supertonic / local-models extras still install from their plain requirement
-files. The clone layer needs its own lock generated with the base as a
-constraint, e.g.:
+### Clone layer (also hash-pinned, linux Docker image)
+
+The optional **clone** flavour is hash-pinned too:
+
+- `backend/requirements-clone.in` — source inputs (base lock as constraint, the
+  PyTorch CPU index, `torch`/`torchaudio`, and `-r requirements-clone.txt`).
+- `backend/requirements-clone.lock` — generated, fully `--hash`ed (torch +
+  every Chatterbox runtime dep, numpy kept consistent with the base lock).
+- `backend/requirements-chatterbox.lock` — `chatterbox-tts==0.1.7` hash, installed
+  `--no-deps` (its declared deps pin numpy<2; the runtime deps come from the
+  clone lock). The wheel is `py3-none-any`, so this hash is cross-platform.
+
+The Dockerfile clone step installs both with `--require-hashes`. Regenerate:
 
 ```bash
-cd backend && uv pip compile --generate-hashes --universal --python-version 3.11 \
-  -c requirements.lock requirements-clone.txt -o requirements-clone.lock
-# torch/torchaudio (==2.6.0+cpu) and chatterbox-tts==0.1.7 --no-deps stay
-# explicit installs; hash-pin torch from download.pytorch.org/whl/cpu separately.
+make lock-clone    # runs in a python:3.11-slim container (needs Docker)
 ```
 
-Verify any clone lock with a full `KURAL_FLAVOUR=clone` image build (~2 GB)
-before wiring it into the Dockerfile.
+`requirements-clone.lock` is **linux-only** on purpose — `torch==2.6.0+cpu` is
+platform-specific (no macOS `+cpu` wheel), so it cannot be `--universal`. It's
+generated in, and targets, the linux clone Docker image. Verified by a full
+`KURAL_FLAVOUR=clone docker compose build` (2026-06-19).
+
+**Still unhashed (follow-up):** the **desktop** clone provisioner
+(`provision-backend-runtime.py`, Windows) and the supertonic / local-models
+extras. The desktop clone path needs its own Windows-generated lock (the linux
+clone lock's wheel hashes won't match Windows wheels) plus a Windows clone-bundle
+build to verify.
 
 ## Known Gaps Until First Real Release
 

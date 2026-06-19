@@ -1,4 +1,4 @@
-.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test mcp-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check rc1-gate rc1-gate-full lock test
+.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test mcp-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check rc1-gate rc1-gate-full lock lock-clone test
 
 backend-test:
 	cd backend && python -m pytest
@@ -67,5 +67,14 @@ rc1-gate-full:
 # Needs `uv`. The Dockerfile + desktop provisioner install from requirements.lock.
 lock:
 	cd backend && uv pip compile --generate-hashes --universal --python-version 3.11 requirements.txt -o requirements.lock
+
+# Regenerate the clone-layer lock. Linux-only (torch==2.6.0+cpu is platform-
+# specific), so it runs in a python:3.11-slim container matching the clone Docker
+# image. Inputs (base constraint + PyTorch index + torch) live in
+# backend/requirements-clone.in. unsafe-best-match lets numpy come from PyPI while
+# torch comes from the PyTorch index (safe: the output lock pins exact hashes).
+lock-clone:
+	docker run --rm -v "$(CURDIR)/backend":/b python:3.11-slim bash -c \
+		"pip install -q uv && cd /b && uv pip compile --generate-hashes --python-version 3.11 --index-strategy unsafe-best-match requirements-clone.in -o requirements-clone.lock"
 
 test: backend-test cli-test mcp-test frontend-lint frontend-unit frontend-build
