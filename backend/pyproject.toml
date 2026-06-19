@@ -31,10 +31,9 @@ dev = ["httpx>=0.27", "pytest>=8.0"]
 clone = [
     "librosa==0.11.0",
     "s3tokenizer",
-    # 4.46.x pairs with diffusers==0.29.0 + chatterbox-tts==0.1.7. Was 5.2.0,
-    # an incompatible major that broke the clone-path install (see
-    # requirements-clone.txt). Re-validate when bumping chatterbox-tts.
-    "transformers==4.46.3",
+    # chatterbox-tts==0.1.7 pins transformers==5.2.0 exactly; diffusers==0.29.0
+    # needs only >=4.25.1 (no conflict). Keep in lockstep with chatterbox-tts.
+    "transformers==5.2.0",
     "diffusers==0.29.0",
     "resemble-perth>=1.0.0",
     "conformer==0.3.2",

@@ -6,6 +6,9 @@
 # same Python environment.
 librosa==0.11.0
 s3tokenizer
+# chatterbox-tts==0.1.7 pins transformers==5.2.0 exactly; diffusers==0.29.0
+# needs only transformers>=4.25.1 (no conflict). Keep in lockstep with the
+# transformers version chatterbox-tts declares whenever it is bumped.
 transformers==5.2.0
 diffusers==0.29.0
 resemble-perth>=1.0.0
