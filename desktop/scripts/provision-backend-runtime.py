@@ -234,7 +234,17 @@ def main() -> int:
 
     subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
     for req in requirements:
-        subprocess.run([str(python), "-m", "pip", "install", "-r", str(req)], check=True)
+        # Install the base runtime from its hash-pinned lock when present
+        # (--require-hashes); the optional clone/supertonic/local-models layers
+        # stay on their plain requirement files until they're locked too.
+        lock = req.with_name("requirements.lock") if req.name == "requirements.txt" else None
+        if lock is not None and lock.exists():
+            subprocess.run(
+                [str(python), "-m", "pip", "install", "--require-hashes", "-r", str(lock)],
+                check=True,
+            )
+        else:
+            subprocess.run([str(python), "-m", "pip", "install", "-r", str(req)], check=True)
     if args.with_clone:
         # Chatterbox needs PyTorch, which ships from a dedicated CPU index and is
         # NOT listed in requirements-clone.txt (the CI installs it separately).
