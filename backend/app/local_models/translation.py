@@ -155,6 +155,12 @@ def _load_indictrans2(direction: str):
         return cached
 
 
+# Max sentences per IndicTrans2 beam-search batch (DoS guard: a 20k-char body
+# split on newlines can be thousands of lines; one forward pass over all of them
+# is a memory/CPU blowup).
+_TRANSLATE_BATCH = 64
+
+
 def _translate_indictrans2(req: TranslationRequest) -> tuple[str, str]:
     source = _lang_code(req.source_language)
     target = _lang_code(req.target_language)
@@ -168,13 +174,6 @@ def _translate_indictrans2(req: TranslationRequest) -> tuple[str, str]:
     if not sentences:
         return "", "indictrans2"
 
-    if processor is not None:
-        prepared = processor.preprocess_batch(sentences, src_lang=src_tag, tgt_lang=tgt_tag)
-    else:
-        # Fallback when IndicTransToolkit is missing — works for short inputs but
-        # quality drops because tokenization/normalization are skipped.
-        prepared = [f"{src_tag} {tgt_tag} {sentence}" for sentence in sentences]
-
     try:
         import torch
     except ImportError as exc:
@@ -182,26 +181,37 @@ def _translate_indictrans2(req: TranslationRequest) -> tuple[str, str]:
             "torch is required for IndicTrans2 inference."
         ) from exc
 
-    inputs = tokenizer(
-        prepared,
-        truncation=True,
-        padding="longest",
-        return_tensors="pt",
-        max_length=512,
-    )
-    with torch.inference_mode():
-        outputs = model.generate(
-            **inputs,
+    decoded_all: list[str] = []
+    for start in range(0, len(sentences), _TRANSLATE_BATCH):
+        batch = sentences[start : start + _TRANSLATE_BATCH]
+        if processor is not None:
+            prepared = processor.preprocess_batch(batch, src_lang=src_tag, tgt_lang=tgt_tag)
+        else:
+            # Fallback when IndicTransToolkit is missing — works for short inputs
+            # but quality drops because tokenization/normalization are skipped.
+            prepared = [f"{src_tag} {tgt_tag} {sentence}" for sentence in batch]
+
+        inputs = tokenizer(
+            prepared,
+            truncation=True,
+            padding="longest",
+            return_tensors="pt",
             max_length=512,
-            num_beams=5,
-            num_return_sequences=1,
         )
-    decoded = tokenizer.batch_decode(
-        outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True
-    )
-    if processor is not None:
-        decoded = processor.postprocess_batch(decoded, lang=tgt_tag)
-    return "\n".join(decoded), "indictrans2"
+        with torch.inference_mode():
+            outputs = model.generate(
+                **inputs,
+                max_length=512,
+                num_beams=5,
+                num_return_sequences=1,
+            )
+        decoded = tokenizer.batch_decode(
+            outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        )
+        if processor is not None:
+            decoded = processor.postprocess_batch(decoded, lang=tgt_tag)
+        decoded_all.extend(decoded)
+    return "\n".join(decoded_all), "indictrans2"
 
 
 def _translate_nllb(_req: TranslationRequest) -> tuple[str, str]:

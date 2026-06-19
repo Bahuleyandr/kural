@@ -482,14 +482,32 @@ export async function exportProjectArchive(
   return zip.generateAsync({ type: "blob", compression: "DEFLATE" });
 }
 
+// Bounds for untrusted .kuralproj imports (decompression/IndexedDB-fill guard).
+const MAX_ARCHIVE_BYTES = 500 * 1024 * 1024; // 500 MB compressed upper bound
+const MAX_ARCHIVE_ENTRIES = 5000;
+const MAX_MANIFEST_CHARS = 16 * 1024 * 1024; // 16 MB of manifest JSON
+const MAX_IMPORT_ASSETS = 2000;
+const MAX_ASSET_BYTES = 64 * 1024 * 1024; // 64 MB per decoded audio asset
+const SAFE_ASSET_PATH = /^audio\/[A-Za-z0-9._-]+$/;
+
 export async function importProjectArchive(file: File): Promise<KuralProject> {
+  if (file.size > MAX_ARCHIVE_BYTES) {
+    throw new Error("Project archive is too large to import.");
+  }
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  if (Object.keys(zip.files).length > MAX_ARCHIVE_ENTRIES) {
+    throw new Error("Project archive has too many entries.");
+  }
   const manifestFile = zip.file("manifest.json");
   if (!manifestFile) {
     throw new Error("Project archive is missing manifest.json");
   }
 
-  const manifest = JSON.parse(await manifestFile.async("string")) as ProjectArchiveManifest;
+  const manifestText = await manifestFile.async("string");
+  if (manifestText.length > MAX_MANIFEST_CHARS) {
+    throw new Error("Project archive manifest is too large.");
+  }
+  const manifest = JSON.parse(manifestText) as ProjectArchiveManifest;
   if (manifest.schemaVersion !== 1 || !manifest.project) {
     throw new Error("Project archive schema is not supported");
   }
@@ -504,16 +522,20 @@ export async function importProjectArchive(file: File): Promise<KuralProject> {
   };
   const assetIdMap = new Map<string, string>();
 
-  for (const asset of manifest.assets || []) {
+  for (const asset of (manifest.assets || []).slice(0, MAX_IMPORT_ASSETS)) {
+    // Only pull assets whose manifest path matches the expected safe shape.
+    if (typeof asset.path !== "string" || !SAFE_ASSET_PATH.test(asset.path)) continue;
     const audioFile = zip.file(asset.path);
     if (!audioFile) continue;
+    const blob = await audioFile.async("blob");
+    if (blob.size > MAX_ASSET_BYTES) continue;
     const newAssetId = createId("asset");
     assetIdMap.set(asset.id, newAssetId);
     await saveAudioAsset({
       ...asset,
       id: newAssetId,
       projectId,
-      blob: await audioFile.async("blob"),
+      blob,
     });
   }
 

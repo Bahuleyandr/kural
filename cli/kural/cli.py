@@ -27,6 +27,9 @@ err_console = Console(stderr=True)
 out_console = Console()
 
 
+_MAX_MANIFEST_BYTES = 16 * 1024 * 1024  # cap manifest.json read (decompression guard)
+
+
 def inspect_project_archive_file(archive_file: str | Path) -> dict:
     """Return a safe summary of a portable .kuralproj archive."""
     archive_path = Path(archive_file)
@@ -37,9 +40,12 @@ def inspect_project_archive_file(archive_file: str | Path) -> dict:
                 if path.is_absolute() or ".." in path.parts:
                     raise click.ClickException(f"Unsafe archive path: {name}")
             try:
-                manifest = json.loads(archive.read("manifest.json"))
+                info = archive.getinfo("manifest.json")
             except KeyError:
                 raise click.ClickException("Project archive is missing manifest.json.")
+            if info.file_size > _MAX_MANIFEST_BYTES:
+                raise click.ClickException("Project archive manifest is too large.")
+            manifest = json.loads(archive.read("manifest.json"))
     except zipfile.BadZipFile:
         raise click.ClickException("Project archive is not a valid zip file.")
     except json.JSONDecodeError as exc:

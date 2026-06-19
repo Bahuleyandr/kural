@@ -81,6 +81,9 @@ def _resolve_output_path(output_path: str, fmt: str) -> Path:
     return candidate
 
 
+_MAX_MANIFEST_BYTES = 16 * 1024 * 1024  # cap manifest.json read (decompression guard)
+
+
 def _inspect_project_archive(path: Path) -> dict:
     if not path.is_file():
         raise KuralBackendError(f"Project archive does not exist: {path}")
@@ -91,9 +94,12 @@ def _inspect_project_archive(path: Path) -> dict:
                 if archive_path.is_absolute() or ".." in archive_path.parts:
                     raise KuralBackendError(f"Unsafe archive path: {name}")
             try:
-                manifest = json.loads(archive.read("manifest.json"))
+                info = archive.getinfo("manifest.json")
             except KeyError:
                 raise KuralBackendError("Project archive is missing manifest.json.")
+            if info.file_size > _MAX_MANIFEST_BYTES:
+                raise KuralBackendError("Project archive manifest is too large.")
+            manifest = json.loads(archive.read("manifest.json"))
     except zipfile.BadZipFile as exc:
         raise KuralBackendError("Project archive is not a valid zip file.") from exc
     except json.JSONDecodeError as exc:

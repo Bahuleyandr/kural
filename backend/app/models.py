@@ -270,7 +270,7 @@ class SynthesizeRequest(BaseModel):
     format: Literal["wav", "mp3"] = Field(default="wav")
     ssml: bool = Field(default=False, description="Parse text as Kural's supported SSML subset.")
     controls: Optional[AudioControls] = None
-    pronunciation_rules: list[PronunciationRule] = Field(default_factory=list)
+    pronunciation_rules: list[PronunciationRule] = Field(default_factory=list, max_length=200)
     language: Optional[str] = Field(default=None, max_length=16)
 
 

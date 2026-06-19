@@ -3,7 +3,7 @@
 
 use std::{
     env, fs,
-    io::Write,
+    io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -291,10 +291,31 @@ fn start_backend(
     command.spawn()
 }
 
+/// True only when GET /healthz returns HTTP 200 — confirms the listener on
+/// `port` is actually our backend, not some other local service that grabbed
+/// the port in the find-free-port TOCTOU window.
+fn backend_healthy(port: u16) -> bool {
+    let mut stream = match TcpStream::connect(("127.0.0.1", port)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let request =
+        format!("GET /healthz HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 256];
+    let read = stream.read(&mut buf).unwrap_or(0);
+    let head = String::from_utf8_lossy(&buf[..read]);
+    head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200")
+}
+
 fn wait_for_backend(port: u16, child: &mut Child, timeout: Duration) -> std::io::Result<()> {
     let deadline = Instant::now() + timeout;
     loop {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if backend_healthy(port) {
             return Ok(());
         }
         if let Some(status) = child.try_wait()? {
@@ -306,7 +327,7 @@ fn wait_for_backend(port: u16, child: &mut Child, timeout: Duration) -> std::io:
         if Instant::now() >= deadline {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                "Backend did not open its local port within 15 seconds.",
+                "Backend did not pass /healthz within the startup window.",
             ));
         }
         thread::sleep(Duration::from_millis(100));

@@ -124,6 +124,12 @@ class Settings(BaseSettings):
             "KURAL_CLONE_ARCHIVE_MAX_UPLOAD_MB", "CLONE_ARCHIVE_MAX_UPLOAD_MB"
         ),
     )
+    # Cap on total cloned voices on disk — bounds the O(N) clone enumeration
+    # done on every list/import and the unbounded growth of CLONE_CACHE_DIR.
+    clone_max_total: int = Field(
+        default=1000,
+        validation_alias=_kural_alias("KURAL_CLONE_MAX_TOTAL", "CLONE_MAX_TOTAL"),
+    )
 
     # Optional offline model packs for multilingual dubbing.
     # Kural never downloads these implicitly; point these at local model folders
@@ -153,6 +159,14 @@ class Settings(BaseSettings):
         default=120.0,
         validation_alias=_kural_alias(
             "KURAL_TRANSCRIBE_STREAM_IDLE_TIMEOUT_S", "TRANSCRIBE_STREAM_IDLE_TIMEOUT_S"
+        ),
+    )
+    # Hard timeout for blocking ASR subprocesses (ffmpeg decode + whisper.cpp)
+    # so a malformed/adversarial media file can't hang a backend worker.
+    asr_subprocess_timeout_s: float = Field(
+        default=300.0,
+        validation_alias=_kural_alias(
+            "KURAL_ASR_SUBPROCESS_TIMEOUT_S", "ASR_SUBPROCESS_TIMEOUT_S"
         ),
     )
     faster_whisper_model_dir: str = "~/.cache/kural/asr/faster-whisper"

@@ -142,9 +142,12 @@ def _ffmpeg_to_pcm16(audio_bytes: bytes) -> bytes:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=True,
+            timeout=settings.asr_subprocess_timeout_s,
         )
     except FileNotFoundError as exc:
         raise LocalModelUnavailable("Vosk transcription requires ffmpeg on the backend host.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise LocalModelUnavailable("ffmpeg audio decode timed out.") from exc
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.decode("utf-8", errors="replace").strip()
         raise LocalModelUnavailable(f"Could not decode audio for Vosk: {detail}") from exc
@@ -259,21 +262,34 @@ def _transcribe_whisper_cpp(
         raise LocalModelUnavailable("WHISPER_CPP_BINARY and WHISPER_CPP_MODEL_FILE must point at local files.")
 
     temp_path = _write_temp_audio(audio_bytes, filename, content_type)
-    out_prefix = Path(tempfile.NamedTemporaryFile(delete=True).name)
-    command = [str(binary), "-m", str(model_file), "-f", str(temp_path), "-otxt", "-of", str(out_prefix)]
-    lang = _lang_code(language)
-    if lang:
-        command.extend(["-l", lang])
+    # Write whisper.cpp output into a private 0700 temp dir rather than a
+    # predictable NamedTemporaryFile name (closes the temp-name TOCTOU window).
     try:
-        subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        text_path = out_prefix.with_suffix(".txt")
-        text = text_path.read_text(encoding="utf-8").strip()
-    except subprocess.CalledProcessError as exc:
-        detail = exc.stderr.decode("utf-8", errors="replace").strip()
-        raise LocalModelUnavailable(f"whisper.cpp failed: {detail}") from exc
+        with tempfile.TemporaryDirectory(prefix="kural-asr-") as out_dir:
+            out_prefix = Path(out_dir) / "out"
+            command = [
+                str(binary), "-m", str(model_file), "-f", str(temp_path),
+                "-otxt", "-of", str(out_prefix),
+            ]
+            lang = _lang_code(language)
+            if lang:
+                command.extend(["-l", lang])
+            try:
+                subprocess.run(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                    timeout=settings.asr_subprocess_timeout_s,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise LocalModelUnavailable("whisper.cpp timed out.") from exc
+            except subprocess.CalledProcessError as exc:
+                detail = exc.stderr.decode("utf-8", errors="replace").strip()
+                raise LocalModelUnavailable(f"whisper.cpp failed: {detail}") from exc
+            text = out_prefix.with_suffix(".txt").read_text(encoding="utf-8").strip()
     finally:
         temp_path.unlink(missing_ok=True)
-        out_prefix.with_suffix(".txt").unlink(missing_ok=True)
 
     segment = AsrSegment(start_ms=0, end_ms=0, text=text) if text else None
     return AsrResult(
