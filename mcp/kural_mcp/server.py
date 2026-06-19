@@ -41,14 +41,47 @@ def _wav_duration_s(path: Path) -> float | None:
         return None
 
 
+def _output_base() -> Path:
+    """Directory that all MCP-written audio is confined to.
+
+    Defaults to ``~/.cache/kural/mcp-output`` and is overridable via
+    ``KURAL_MCP_OUTPUT_DIR``. Confinement matters because ``output_path`` is a
+    tool argument: an MCP client (or a prompt-injection payload reaching the
+    model that drives it) could otherwise make the server write attacker-chosen
+    bytes to any path the process can reach (``~/.bashrc``, autostart, ...).
+    """
+    configured = os.environ.get("KURAL_MCP_OUTPUT_DIR", "").strip()
+    base = (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".cache" / "kural" / "mcp-output"
+    )
+    return base.resolve()
+
+
 def _resolve_output_path(output_path: str, fmt: str) -> Path:
-    if output_path.strip():
-        path = Path(output_path).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
-    fd, name = tempfile.mkstemp(prefix="kural_", suffix=f".{fmt}")
-    os.close(fd)
-    return Path(name)
+    base = _output_base()
+    base.mkdir(parents=True, exist_ok=True)
+    raw = output_path.strip()
+    if not raw:
+        fd, name = tempfile.mkstemp(prefix="kural_", suffix=f".{fmt}", dir=str(base))
+        os.close(fd)
+        return Path(name)
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    candidate = candidate.resolve()
+    if candidate == base or not candidate.is_relative_to(base):
+        raise KuralBackendError(
+            f"output_path must be a file inside {base} "
+            "(set KURAL_MCP_OUTPUT_DIR to change the allowed directory); "
+            f"refusing to write to {candidate}."
+        )
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+_MAX_MANIFEST_BYTES = 16 * 1024 * 1024  # cap manifest.json read (decompression guard)
 
 
 def _inspect_project_archive(path: Path) -> dict:
@@ -61,9 +94,12 @@ def _inspect_project_archive(path: Path) -> dict:
                 if archive_path.is_absolute() or ".." in archive_path.parts:
                     raise KuralBackendError(f"Unsafe archive path: {name}")
             try:
-                manifest = json.loads(archive.read("manifest.json"))
+                info = archive.getinfo("manifest.json")
             except KeyError:
                 raise KuralBackendError("Project archive is missing manifest.json.")
+            if info.file_size > _MAX_MANIFEST_BYTES:
+                raise KuralBackendError("Project archive manifest is too large.")
+            manifest = json.loads(archive.read("manifest.json"))
     except zipfile.BadZipFile as exc:
         raise KuralBackendError("Project archive is not a valid zip file.") from exc
     except json.JSONDecodeError as exc:

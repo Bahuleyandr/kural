@@ -1,4 +1,5 @@
 import logging
+import os
 import traceback
 from datetime import datetime, timezone
 
@@ -23,6 +24,40 @@ from .routers import (
     voices,
 )
 from slowapi.errors import RateLimitExceeded
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", ""}
+
+
+def _enforce_network_auth() -> None:
+    """Fail closed when exposed beyond loopback without an API key.
+
+    ``KURAL_BIND`` mirrors the interface the operator intends to expose Kural
+    on (the docker-compose host mapping). If that is a non-loopback interface
+    but ``KURAL_API_KEY`` is unset, the service would be reachable on the LAN
+    with auth disabled — refuse to start unless the operator explicitly opts in
+    with ``KURAL_ALLOW_INSECURE_NETWORK=1``.
+    """
+    host = settings.bind_host.strip().lower()
+    if host in _LOOPBACK_HOSTS:
+        return
+    if settings.api_key.strip():
+        return
+    allow = os.environ.get("KURAL_ALLOW_INSECURE_NETWORK", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if allow:
+        return
+    raise RuntimeError(
+        f"Refusing to start: KURAL_BIND={settings.bind_host!r} exposes Kural beyond "
+        "loopback but KURAL_API_KEY is not set, so the API would be unauthenticated "
+        "on the network. Set KURAL_API_KEY, or set KURAL_ALLOW_INSECURE_NETWORK=1 "
+        "to override (NOT recommended)."
+    )
+
+
+_enforce_network_auth()
 
 app = FastAPI(
     title="Kural TTS API",

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getApiKey, getApiUrl, rehydrateTauriGlobals } from "../lib/api";
+import { getApiKey, getApiUrl, rehydrateTauriGlobals, wsAuthProtocols } from "../lib/api";
 import { DEFAULT_DICTATION_SETTINGS, loadDictationSettings } from "../lib/dictationSettings";
 import {
   applyTranscriptFrame,
@@ -154,10 +154,10 @@ export default function DictationWidget() {
     const apiKey = getApiKey();
     const wsBase = apiUrl.replace(/^http/, "ws");
     const query = new URLSearchParams();
-    if (apiKey) query.set("api_key", apiKey);
     if (settings.language.trim()) query.set("language", settings.language.trim());
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    const ws = new WebSocket(`${wsBase}/api/transcribe/stream${suffix}`);
+    // API key travels via WS subprotocol (out of the URL/logs), not the query.
+    const ws = new WebSocket(`${wsBase}/api/transcribe/stream${suffix}`, wsAuthProtocols(apiKey));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 

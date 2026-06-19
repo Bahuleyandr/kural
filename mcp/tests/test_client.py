@@ -4,7 +4,22 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from kural_mcp.client import DEFAULT_HOST, KuralBackendError, KuralClient, _explain
+from kural_mcp.client import (
+    DEFAULT_HOST,
+    KuralBackendError,
+    KuralClient,
+    _explain,
+    _validate_host,
+)
+
+
+def test_validate_host_rejects_bad_scheme():
+    with pytest.raises(KuralBackendError, match="http"):
+        _validate_host("file:///etc/passwd")
+
+
+def test_validate_host_accepts_loopback_http_and_strips_slash():
+    assert _validate_host("http://127.0.0.1:8000/") == "http://127.0.0.1:8000"
 
 
 def test_host_defaults_and_env(monkeypatch):

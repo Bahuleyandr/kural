@@ -7,10 +7,11 @@ silently did nothing — leaving API-key auth disabled even when an operator set
 ``KURAL_API_KEY``. The previous test-suite only ever set ``settings.api_key``
 directly via monkeypatch, so the env→field binding was never exercised.
 """
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings, settings
-from app.main import app
+from app.main import _enforce_network_auth, app
 
 _MANAGED_ENV = (
     "KURAL_API_KEY",
@@ -63,6 +64,49 @@ def test_kural_ollama_and_lip_sync_env_bind(monkeypatch):
 
 def test_kural_telemetry_opt_in_binds(monkeypatch):
     assert _settings(monkeypatch, KURAL_TELEMETRY_OPT_IN="true").telemetry_opt_in is True
+
+
+def test_kural_prefixed_security_envs_bind(monkeypatch):
+    """The documented KURAL_ prefix must override security-relevant settings,
+    not only the aliased auth/telemetry fields."""
+    s = _settings(
+        monkeypatch,
+        KURAL_RATE_LIMIT_CLONE="2/minute",
+        KURAL_CONSENT_LOG_PATH="/tmp/consent.log",
+        KURAL_CLONE_MAX_UPLOAD_MB="7",
+        KURAL_TRANSCRIBE_STREAM_MAX_CONCURRENT="2",
+    )
+    assert s.rate_limit_clone == "2/minute"
+    assert s.consent_log_path == "/tmp/consent.log"
+    assert s.clone_max_upload_mb == 7
+    assert s.transcribe_stream_max_concurrent == 2
+
+
+def test_loopback_bind_starts_without_key(monkeypatch):
+    monkeypatch.setattr(settings, "bind_host", "127.0.0.1")
+    monkeypatch.setattr(settings, "api_key", "")
+    _enforce_network_auth()  # must not raise
+
+
+def test_network_bind_without_key_refuses_to_start(monkeypatch):
+    monkeypatch.setattr(settings, "bind_host", "0.0.0.0")
+    monkeypatch.setattr(settings, "api_key", "")
+    monkeypatch.delenv("KURAL_ALLOW_INSECURE_NETWORK", raising=False)
+    with pytest.raises(RuntimeError, match="Refusing to start"):
+        _enforce_network_auth()
+
+
+def test_network_bind_with_key_is_allowed(monkeypatch):
+    monkeypatch.setattr(settings, "bind_host", "0.0.0.0")
+    monkeypatch.setattr(settings, "api_key", "s3cret")
+    _enforce_network_auth()  # must not raise
+
+
+def test_network_bind_insecure_override(monkeypatch):
+    monkeypatch.setattr(settings, "bind_host", "0.0.0.0")
+    monkeypatch.setattr(settings, "api_key", "")
+    monkeypatch.setenv("KURAL_ALLOW_INSECURE_NETWORK", "1")
+    _enforce_network_auth()  # explicit opt-in must not raise
 
 
 def test_protected_route_requires_key_when_configured(monkeypatch):

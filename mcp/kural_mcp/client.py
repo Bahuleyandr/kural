@@ -8,7 +8,9 @@ backends alike.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -46,9 +48,39 @@ def _explain(host: str, exc: Exception) -> KuralBackendError:
     return KuralBackendError(f"Kural backend request failed: {exc}")
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _validate_host(host: str) -> str:
+    """Validate the backend base URL before any request (or the API key) is
+    sent there. Rejects non-http(s) schemes; warns on cleartext http to a
+    non-loopback host (set KURAL_ALLOW_INSECURE_HOST=1 to silence)."""
+    parsed = urlparse(host)
+    if parsed.scheme not in ("http", "https"):
+        raise KuralBackendError(
+            f"KURAL_HOST must start with http:// or https:// (got {host!r})."
+        )
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in _LOOPBACK_HOSTS and parsed.scheme == "http":
+        allow = os.environ.get("KURAL_ALLOW_INSECURE_HOST", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if not allow:
+            # stderr only — MCP uses stdout for the JSON-RPC protocol.
+            print(
+                "Warning: sending requests (and any API key) to a non-loopback host "
+                f"over cleartext http: {host}. Prefer https://; set "
+                "KURAL_ALLOW_INSECURE_HOST=1 to silence.",
+                file=sys.stderr,
+            )
+    return host.rstrip("/")
+
+
 class KuralClient:
     def __init__(self, host: str | None = None, api_key: str | None = None) -> None:
-        self.host = (host or os.environ.get("KURAL_HOST") or DEFAULT_HOST).rstrip("/")
+        self.host = _validate_host(host or os.environ.get("KURAL_HOST") or DEFAULT_HOST)
         # The backend only requires X-API-Key when KURAL_API_KEY is set on
         # the server. Sending an empty header is harmless when it isn't.
         self.api_key = api_key if api_key is not None else os.environ.get("KURAL_API_KEY", "")

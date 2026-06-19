@@ -50,6 +50,16 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    # These gate the conditional signing/notarization steps below and MUST live
+    # at job level: a step's own `env:` block is NOT in scope for that same
+    # step's `if:` condition. Defining them only in the step env made every
+    # `if: env.X != ''` evaluate to '' → signing/notarization silently skipped
+    # even when the secrets were configured.
+    env:
+      KURAL_WIN_CERT_FILE: ${{ secrets.KURAL_WIN_CERT_FILE }}
+      KURAL_MAC_CERT_BASE64: ${{ secrets.KURAL_MAC_CERT_BASE64 }}
+      KURAL_APPLE_ID: ${{ secrets.KURAL_APPLE_ID }}
+
     steps:
       - uses: actions/checkout@v6
         with:
@@ -63,7 +73,7 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Install Linux build deps
         if: matrix.target == 'linux'
@@ -130,7 +140,15 @@ jobs:
           done
 
       - name: Smoke check artifacts
-        run: python desktop/scripts/smoke-release-artifacts.py --require-signatures
+        shell: bash
+        run: |
+          args="--require-signatures"
+          # When Windows signing is configured, cryptographically verify the
+          # Authenticode signature (signtool verify /pa), not just .sig presence.
+          if [ "${{ matrix.target }}" = "windows" ] && [ -n "$KURAL_WIN_CERT_FILE" ]; then
+            args="$args --verify-authenticode"
+          fi
+          python desktop/scripts/smoke-release-artifacts.py $args
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v7
@@ -158,7 +176,7 @@ jobs:
           path: dist
 
       - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: dist/**/*
           generate_release_notes: true

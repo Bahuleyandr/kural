@@ -1,15 +1,57 @@
 """HTTP client for the Kural backend API."""
+import os
+import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
+import click
 import httpx
 
 DEFAULT_HOST = "http://localhost:8000"
 _TIMEOUT = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _headers() -> dict[str, str]:
+    """Attach X-API-Key when KURAL_API_KEY is set so the CLI keeps working
+    against a backend hardened with an API key. Empty when unset."""
+    key = os.environ.get("KURAL_API_KEY", "")
+    return {"X-API-Key": key} if key else {}
+
+
+def validate_host(host: str) -> str:
+    """Validate the backend base URL before sending requests (and the API key)
+    to it. Rejects non-http(s) schemes outright; warns on cleartext http to a
+    non-loopback host (set KURAL_ALLOW_INSECURE_HOST=1 to silence)."""
+    parsed = urlparse(host)
+    if parsed.scheme not in ("http", "https"):
+        raise click.ClickException(
+            f"--host/KURAL_HOST must start with http:// or https:// (got {host!r})."
+        )
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in _LOOPBACK_HOSTS and parsed.scheme == "http":
+        allow = os.environ.get("KURAL_ALLOW_INSECURE_HOST", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if not allow:
+            print(
+                "Warning: sending requests (and any API key) to a non-loopback host "
+                f"over cleartext http: {host}. Prefer https://; set "
+                "KURAL_ALLOW_INSECURE_HOST=1 to silence.",
+                file=sys.stderr,
+            )
+    return host.rstrip("/")
+
+
+def _client(host: str) -> httpx.Client:
+    return httpx.Client(base_url=validate_host(host), timeout=_TIMEOUT, headers=_headers())
 
 
 def get_voices(host: str = DEFAULT_HOST) -> list[dict]:
     """Return the Kokoro voice list from GET /api/voices."""
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         resp = client.get("/api/voices")
         resp.raise_for_status()
         return resp.json()["voices"]
@@ -34,7 +76,7 @@ def synthesize(
         body["voice"] = voice
         body["speed"] = speed
 
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         resp = client.post("/api/synthesize", json=body)
         resp.raise_for_status()
         return resp.content
@@ -42,7 +84,7 @@ def synthesize(
 
 def list_clones(host: str = DEFAULT_HOST) -> list[dict]:
     """Return saved cloned voices from GET /api/voices/clones."""
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         resp = client.get("/api/voices/clones")
         resp.raise_for_status()
         return resp.json()["clones"]
@@ -50,7 +92,7 @@ def list_clones(host: str = DEFAULT_HOST) -> list[dict]:
 
 def list_model_packs(host: str = DEFAULT_HOST) -> dict:
     """Return local model-pack inventory from GET /api/model-packs."""
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         resp = client.get("/api/model-packs")
         resp.raise_for_status()
         return resp.json()
@@ -64,7 +106,7 @@ def clone_voice(
 ) -> dict:
     """Upload an audio sample to POST /api/voices/clone and return the clone metadata."""
     audio_path = Path(audio_path)
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         with open(audio_path, "rb") as fh:
             resp = client.post(
                 "/api/voices/clone",
@@ -77,7 +119,7 @@ def clone_voice(
 
 def delete_clone(voice_id: str, host: str = DEFAULT_HOST) -> None:
     """DELETE /api/voices/clones/{voice_id}."""
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         resp = client.delete(f"/api/voices/clones/{voice_id}")
         resp.raise_for_status()
 
@@ -85,7 +127,7 @@ def delete_clone(voice_id: str, host: str = DEFAULT_HOST) -> None:
 def export_clones(host: str = DEFAULT_HOST, voice_ids: list[str] | None = None) -> bytes:
     """GET /api/voices/clones/export and return a zip archive."""
     params = [("voice_id", voice_id) for voice_id in voice_ids or []]
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         resp = client.get("/api/voices/clones/export", params=params)
         resp.raise_for_status()
         return resp.content
@@ -94,7 +136,7 @@ def export_clones(host: str = DEFAULT_HOST, voice_ids: list[str] | None = None) 
 def import_clones(archive_path: str | Path, host: str = DEFAULT_HOST) -> list[dict]:
     """Upload a Kural voice archive to POST /api/voices/clones/import."""
     archive_path = Path(archive_path)
-    with httpx.Client(base_url=host, timeout=_TIMEOUT) as client:
+    with _client(host) as client:
         with open(archive_path, "rb") as fh:
             resp = client.post(
                 "/api/voices/clones/import",

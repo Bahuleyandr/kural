@@ -131,8 +131,16 @@ def _load_indictrans2(direction: str):
             ) from exc
 
         model_dir = _model_dir_for_direction(direction)
-        tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
-        model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir), trust_remote_code=True)
+        # trust_remote_code executes arbitrary Python shipped inside the model
+        # directory at load time. The dir is operator/config-supplied
+        # (INDICTRANS2_MODEL_DIR) and filled by community "model packs", so this
+        # is a code-execution trust boundary — default OFF and require an
+        # explicit, knowing opt-in. Official IndicTrans2 checkpoints that need
+        # custom modeling code will surface a clear transformers error telling
+        # the user to set KURAL_ALLOW_REMOTE_MODEL_CODE=1 if they trust the dir.
+        trust = settings.allow_remote_model_code
+        tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=trust)
+        model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir), trust_remote_code=trust)
         model.eval()
 
         try:
@@ -145,6 +153,12 @@ def _load_indictrans2(direction: str):
         cached = (tokenizer, model, processor)
         _indictrans2_cache[direction] = cached
         return cached
+
+
+# Max sentences per IndicTrans2 beam-search batch (DoS guard: a 20k-char body
+# split on newlines can be thousands of lines; one forward pass over all of them
+# is a memory/CPU blowup).
+_TRANSLATE_BATCH = 64
 
 
 def _translate_indictrans2(req: TranslationRequest) -> tuple[str, str]:
@@ -160,13 +174,6 @@ def _translate_indictrans2(req: TranslationRequest) -> tuple[str, str]:
     if not sentences:
         return "", "indictrans2"
 
-    if processor is not None:
-        prepared = processor.preprocess_batch(sentences, src_lang=src_tag, tgt_lang=tgt_tag)
-    else:
-        # Fallback when IndicTransToolkit is missing — works for short inputs but
-        # quality drops because tokenization/normalization are skipped.
-        prepared = [f"{src_tag} {tgt_tag} {sentence}" for sentence in sentences]
-
     try:
         import torch
     except ImportError as exc:
@@ -174,26 +181,37 @@ def _translate_indictrans2(req: TranslationRequest) -> tuple[str, str]:
             "torch is required for IndicTrans2 inference."
         ) from exc
 
-    inputs = tokenizer(
-        prepared,
-        truncation=True,
-        padding="longest",
-        return_tensors="pt",
-        max_length=512,
-    )
-    with torch.inference_mode():
-        outputs = model.generate(
-            **inputs,
+    decoded_all: list[str] = []
+    for start in range(0, len(sentences), _TRANSLATE_BATCH):
+        batch = sentences[start : start + _TRANSLATE_BATCH]
+        if processor is not None:
+            prepared = processor.preprocess_batch(batch, src_lang=src_tag, tgt_lang=tgt_tag)
+        else:
+            # Fallback when IndicTransToolkit is missing — works for short inputs
+            # but quality drops because tokenization/normalization are skipped.
+            prepared = [f"{src_tag} {tgt_tag} {sentence}" for sentence in batch]
+
+        inputs = tokenizer(
+            prepared,
+            truncation=True,
+            padding="longest",
+            return_tensors="pt",
             max_length=512,
-            num_beams=5,
-            num_return_sequences=1,
         )
-    decoded = tokenizer.batch_decode(
-        outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True
-    )
-    if processor is not None:
-        decoded = processor.postprocess_batch(decoded, lang=tgt_tag)
-    return "\n".join(decoded), "indictrans2"
+        with torch.inference_mode():
+            outputs = model.generate(
+                **inputs,
+                max_length=512,
+                num_beams=5,
+                num_return_sequences=1,
+            )
+        decoded = tokenizer.batch_decode(
+            outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        )
+        if processor is not None:
+            decoded = processor.postprocess_batch(decoded, lang=tgt_tag)
+        decoded_all.extend(decoded)
+    return "\n".join(decoded_all), "indictrans2"
 
 
 def _translate_nllb(_req: TranslationRequest) -> tuple[str, str]:

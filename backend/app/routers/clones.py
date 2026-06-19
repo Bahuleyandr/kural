@@ -139,13 +139,23 @@ async def clone_voice(
             detail=_error("voice_clone_unavailable", str(exc)),
         ) from exc
 
-    record_consent(
+    if not record_consent(
         voice_id=meta["id"],
         voice_name=clean_name,
         sample_bytes=audio_bytes,
         client_host=request.client.host if request.client else None,
         language=language.strip() if language else None,
-    )
+    ):
+        # The consent ledger is a core guarantee: no clone may persist without a
+        # durable consent record. Roll back the just-written clone and fail loud.
+        delete_cloned_voice(meta["id"])
+        raise HTTPException(
+            status_code=503,
+            detail=_error(
+                "consent_ledger_unavailable",
+                "Could not persist the consent record; clone aborted.",
+            ),
+        )
 
     return ClonedVoiceInfo(**meta)
 

@@ -56,6 +56,11 @@ function parsePcmWav(buffer: ArrayBuffer) {
     throw new Error("Only PCM WAV chunks can be stitched");
   }
 
+  // Clamp the declared data size to what the buffer actually holds — a crafted
+  // WAV can claim a `data` chunk larger than the file, which would otherwise
+  // throw a RangeError when constructing the view.
+  const safeSize = Math.max(0, Math.min(dataSize, buffer.byteLength - dataOffset));
+
   return {
     audioFormat,
     channels,
@@ -63,7 +68,7 @@ function parsePcmWav(buffer: ArrayBuffer) {
     byteRate,
     blockAlign,
     bitsPerSample,
-    data: new Uint8Array(buffer, dataOffset, dataSize),
+    data: new Uint8Array(buffer, dataOffset, safeSize),
   };
 }
 

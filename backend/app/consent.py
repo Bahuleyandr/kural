@@ -45,8 +45,9 @@ def record_consent(
     source: str = "clone-upload",
     consent_text: str = CONSENT_TEXT,
     consent_confirmed: bool = True,
-) -> None:
-    """Append a consent record. Best-effort — never raises into the caller.
+) -> bool:
+    """Append a consent record. Returns True if persisted, False on write
+    failure (the caller decides whether that is fatal). Never raises.
 
     ``source`` distinguishes a fresh clone upload from an archive import; the
     latter carries consent asserted by the originating archive rather than a
@@ -72,5 +73,9 @@ def record_consent(
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(line)
+                fh.flush()
+                os.fsync(fh.fileno())
     except OSError as exc:
         _log.warning("Failed to append consent record for %s: %s", voice_id, exc)
+        return False
+    return True

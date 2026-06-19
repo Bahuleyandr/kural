@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import shutil
 import subprocess
@@ -29,7 +30,13 @@ router = APIRouter(tags=["local-models"])
 # Security scheme that can't resolve against a WebSocket handshake. The
 # streaming route below self-authenticates via auth.check_api_key.
 stream_router = APIRouter(tags=["local-models"])
+# Batch ASR/translation/alignment work.
 _executor = ThreadPoolExecutor(max_workers=1)
+# Dedicated pool for streaming dictation so long-lived sockets can't starve the
+# batch endpoints (and vice-versa). Sized to the concurrency cap.
+_stream_executor = ThreadPoolExecutor(
+    max_workers=max(1, settings.transcribe_stream_max_concurrent)
+)
 
 _ACCEPTED_TRANSCRIBE_MIME = {
     "audio/wav",
@@ -261,14 +268,48 @@ async def mux_dubbed_video(
 _active_streams = 0
 
 
+_WS_KEY_SUBPROTOCOL_PREFIX = "kural-apikey."
+_WS_SUBPROTOCOL = "kural.v1"
+
+
+def _ws_offered_protocols(websocket: WebSocket) -> list[str]:
+    raw = websocket.headers.get("sec-websocket-protocol", "")
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _ws_api_key(websocket: WebSocket) -> str | None:
+    """Resolve the API key for a WebSocket handshake, preferring channels that
+    keep the secret OUT of the URL/query string (which lands in access logs):
+
+      1. ``X-API-Key`` header (non-browser clients).
+      2. A ``kural-apikey.<base64url(key)>`` subprotocol token — browsers can't
+         set headers but can offer subprotocols, which travel in the
+         Sec-WebSocket-Protocol request header, not the URL.
+      3. ``?api_key=`` query param — DEPRECATED (logged); kept for back-compat.
+    """
+    header_key = websocket.headers.get("x-api-key")
+    if header_key:
+        return header_key
+    for proto in _ws_offered_protocols(websocket):
+        if proto.startswith(_WS_KEY_SUBPROTOCOL_PREFIX):
+            token = proto[len(_WS_KEY_SUBPROTOCOL_PREFIX) :]
+            try:
+                pad = "=" * (-len(token) % 4)
+                return base64.urlsafe_b64decode(token + pad).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return None
+    return websocket.query_params.get("api_key")
+
+
 @stream_router.websocket("/transcribe/stream")
 async def transcribe_stream(websocket: WebSocket) -> None:
     """Incremental speech-to-text over WebSocket, backed by Vosk.
 
     Powers the desktop dictation widget. Protocol:
       - Connect with optional ``?language=<bcp47>&sample_rate=<hz>`` query
-        params (sample_rate defaults to 16000).
-      - Send binary frames of little-endian PCM16 mono audio.
+        params (sample_rate defaults to 16000, clamped to 8000-48000).
+      - Send binary frames of little-endian PCM16 mono audio (each frame
+        capped at ``transcribe_stream_max_frame_bytes``).
       - Receive JSON frames: ``{"type": "partial"|"final", "text": ...}``.
         A "partial" is the in-progress hypothesis; a "final" lands when
         Vosk detects an utterance boundary.
@@ -281,17 +322,12 @@ async def transcribe_stream(websocket: WebSocket) -> None:
     sends one ``{"type": "error", ...}`` frame, and closes — the widget
     can fall back to the batch `/api/transcribe` endpoint.
 
-    Auth: when KURAL_API_KEY is set, pass it as the ``X-API-Key`` header
-    or — for browser WebSocket clients that cannot set headers — as an
-    ``?api_key=`` query param.
+    Auth: when KURAL_API_KEY is set, pass it as the ``X-API-Key`` header,
+    a ``kural-apikey.<base64url(key)>`` WebSocket subprotocol (browsers), or
+    — deprecated — an ``?api_key=`` query param. See ``_ws_api_key``.
     """
     # Self-authenticate: this route isn't on the require_api_key router.
-    # Browser WebSocket clients (the dictation widget) cannot set headers,
-    # so a query param is accepted as a fallback.
-    provided_key = (
-        websocket.headers.get("x-api-key") or websocket.query_params.get("api_key")
-    )
-    if not check_api_key(provided_key):
+    if not check_api_key(_ws_api_key(websocket)):
         await websocket.close(code=1008)  # policy violation
         return
 
@@ -303,7 +339,12 @@ async def transcribe_stream(websocket: WebSocket) -> None:
         await websocket.close(code=1013)
         return
 
-    await websocket.accept()
+    # Echo back the non-secret subprotocol when offered so the browser's
+    # subprotocol negotiation succeeds (it requires the server to select one).
+    subprotocol = (
+        _WS_SUBPROTOCOL if _WS_SUBPROTOCOL in _ws_offered_protocols(websocket) else None
+    )
+    await websocket.accept(subprotocol=subprotocol)
     _active_streams += 1
     try:
         language = websocket.query_params.get("language") or None
@@ -311,6 +352,7 @@ async def transcribe_stream(websocket: WebSocket) -> None:
             sample_rate = int(websocket.query_params.get("sample_rate", "16000"))
         except ValueError:
             sample_rate = 16000
+        sample_rate = max(8000, min(sample_rate, 48000))
 
         try:
             transcriber = StreamingTranscriber(language=language, sample_rate=sample_rate)
@@ -322,9 +364,15 @@ async def transcribe_stream(websocket: WebSocket) -> None:
             return
 
         loop = asyncio.get_running_loop()
+        max_frame = settings.transcribe_stream_max_frame_bytes
+        idle_timeout = settings.transcribe_stream_idle_timeout_s
         try:
             while True:
-                message = await websocket.receive()
+                try:
+                    message = await asyncio.wait_for(websocket.receive(), timeout=idle_timeout)
+                except asyncio.TimeoutError:
+                    await websocket.close(code=1000)  # idle: normal closure
+                    break
                 if message["type"] == "websocket.disconnect":
                     break
 
@@ -332,7 +380,15 @@ async def transcribe_stream(websocket: WebSocket) -> None:
                 if chunk is not None:
                     if not chunk:
                         continue
-                    result = await loop.run_in_executor(_executor, transcriber.accept, chunk)
+                    if len(chunk) > max_frame:
+                        await websocket.close(code=1009)  # message too big
+                        break
+                    if len(chunk) % 2:
+                        # PCM16 is 2 bytes/sample; drop malformed odd-length frames.
+                        continue
+                    result = await loop.run_in_executor(
+                        _stream_executor, transcriber.accept, chunk
+                    )
                     await websocket.send_json(result)
                     continue
 
@@ -343,7 +399,9 @@ async def transcribe_stream(websocket: WebSocket) -> None:
                     except ValueError:
                         continue
                     if payload.get("type") == "done":
-                        final = await loop.run_in_executor(_executor, transcriber.finalize)
+                        final = await loop.run_in_executor(
+                            _stream_executor, transcriber.finalize
+                        )
                         await websocket.send_json(final)
                         break
         except WebSocketDisconnect:

@@ -107,6 +107,11 @@ def _read_sample_info(audio_bytes: bytes) -> tuple[float, int]:
 
 
 def _write_clone_record(meta: dict, sample_bytes: bytes) -> dict:
+    if len(_existing_clone_ids()) >= settings.clone_max_total:
+        raise ValueError(
+            f"Cloned-voice limit reached ({settings.clone_max_total}). "
+            "Delete unused clones or raise KURAL_CLONE_MAX_TOTAL."
+        )
     voice_dir = _voice_dir(meta["id"])
     if voice_dir.exists():
         raise ValueError(f"Cloned voice already exists: {meta['id']}")

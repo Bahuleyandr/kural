@@ -19,7 +19,11 @@ from ..tts.supertonic_engine import (
 )
 
 router = APIRouter(tags=["synthesis"])
-_executor = ThreadPoolExecutor(max_workers=2)
+# Serialize synthesis: Kokoro phonemizes via espeak-ng, whose global C state is
+# NOT thread-safe, and the engines are shared singletons. One worker removes the
+# concurrent-inference race at the cost of parallel synth throughput (acceptable
+# for the single-tenant target; revisit with per-engine locks if needed).
+_executor = ThreadPoolExecutor(max_workers=1)
 _FFMPEG_TIMEOUT_S = 60
 
 
