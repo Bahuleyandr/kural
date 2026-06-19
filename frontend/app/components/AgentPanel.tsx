@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { apiFetch, getApiKey, readApiError } from "../lib/api";
+import { apiFetch, getApiKey, readApiError, wsAuthProtocols } from "../lib/api";
 import {
   applyTranscriptFrame,
   floatTo16BitPCM,
@@ -162,9 +162,12 @@ export function AgentPanel(props: {
     const wsBase = props.apiUrl.replace(/^http/, "ws");
     const query = new URLSearchParams();
     const apiKey = getApiKey();
-    if (apiKey) query.set("api_key", apiKey);
     if (props.projectLanguage) query.set("language", props.projectLanguage);
-    const ws = new WebSocket(`${wsBase}/api/transcribe/stream?${query.toString()}`);
+    // API key travels via WS subprotocol (out of the URL/logs), not the query.
+    const ws = new WebSocket(
+      `${wsBase}/api/transcribe/stream?${query.toString()}`,
+      wsAuthProtocols(apiKey),
+    );
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     ws.onmessage = (event) => {

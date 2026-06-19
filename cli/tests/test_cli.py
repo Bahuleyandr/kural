@@ -1,9 +1,28 @@
 import json
 import zipfile
 
+import click
+import pytest
 from click.testing import CliRunner
 
 from kural import cli as cli_module
+from kural import client as client_module
+
+
+def test_client_sends_api_key_header_when_set(monkeypatch):
+    monkeypatch.setenv("KURAL_API_KEY", "s3cret")
+    assert client_module._headers() == {"X-API-Key": "s3cret"}
+    monkeypatch.delenv("KURAL_API_KEY", raising=False)
+    assert client_module._headers() == {}
+
+
+def test_validate_host_rejects_non_http_scheme():
+    with pytest.raises(click.ClickException):
+        client_module.validate_host("ftp://backend/api")
+
+
+def test_validate_host_accepts_loopback_and_strips_slash():
+    assert client_module.validate_host("http://localhost:8000/") == "http://localhost:8000"
 
 
 def test_voices_export_writes_archive(tmp_path, monkeypatch):

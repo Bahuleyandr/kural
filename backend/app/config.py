@@ -25,15 +25,29 @@ class Settings(BaseSettings):
     app_version: str = APP_VERSION
     tts_engine: str = "kokoro-onnx"
     sample_rate: int = 24000
-    cors_origins: list[str] = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:8080",
-        "http://127.0.0.1:3000",
-        "http://tauri.localhost",
-        "https://tauri.localhost",
-    ]
-    max_text_length: int = 10000
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+        ],
+        validation_alias=_kural_alias("KURAL_CORS_ORIGINS", "CORS_ORIGINS"),
+    )
+    max_text_length: int = Field(
+        default=10000,
+        validation_alias=_kural_alias("KURAL_MAX_TEXT_LENGTH", "MAX_TEXT_LENGTH"),
+    )
+
+    # Interface the operator intends to expose Kural on (mirrors the
+    # docker-compose KURAL_BIND). Used only as a fail-closed signal at startup:
+    # a non-loopback value with no API key refuses to start (see main.py).
+    bind_host: str = Field(
+        default="127.0.0.1",
+        validation_alias=_kural_alias("KURAL_BIND", "BIND_HOST"),
+    )
 
     # Optional shared-secret API key. When set (KURAL_API_KEY env var, or the
     # legacy bare API_KEY), all /api/* requests must send X-API-Key. Empty
@@ -42,11 +56,30 @@ class Settings(BaseSettings):
 
     # Per-IP rate limits, slowapi syntax. Synthesis is CPU-heavy; cloning
     # writes durable state, so it stays tighter.
-    rate_limit_synthesize: str = "30/minute"
-    rate_limit_clone: str = "5/minute"
+    rate_limit_synthesize: str = Field(
+        default="30/minute",
+        validation_alias=_kural_alias("KURAL_RATE_LIMIT_SYNTHESIZE", "RATE_LIMIT_SYNTHESIZE"),
+    )
+    rate_limit_clone: str = Field(
+        default="5/minute",
+        validation_alias=_kural_alias("KURAL_RATE_LIMIT_CLONE", "RATE_LIMIT_CLONE"),
+    )
+    # When the app sits behind a TRUSTED reverse proxy, key rate limits on the
+    # leftmost X-Forwarded-For hop instead of the proxy's socket address.
+    # Leave OFF unless a trusted proxy always sets the header — otherwise it is
+    # client-spoofable. Off by default keeps the direct-bind behavior.
+    rate_limit_trust_forwarded: bool = Field(
+        default=False,
+        validation_alias=_kural_alias(
+            "KURAL_RATE_LIMIT_TRUST_FORWARDED", "RATE_LIMIT_TRUST_FORWARDED"
+        ),
+    )
 
     # Append-only consent audit log location.
-    consent_log_path: str = "~/.cache/kural/consent.log"
+    consent_log_path: str = Field(
+        default="~/.cache/kural/consent.log",
+        validation_alias=_kural_alias("KURAL_CONSENT_LOG_PATH", "CONSENT_LOG_PATH"),
+    )
 
     # Vendor-neutral, opt-in error reporting. Both must be set for any
     # outbound network traffic to occur.
@@ -81,8 +114,16 @@ class Settings(BaseSettings):
     clone_cache_dir: str = "~/.cache/kural/clones"
     clone_min_duration_s: float = 5.0
     clone_max_duration_s: float = 30.0
-    clone_max_upload_mb: int = 25
-    clone_archive_max_upload_mb: int = 250
+    clone_max_upload_mb: int = Field(
+        default=25,
+        validation_alias=_kural_alias("KURAL_CLONE_MAX_UPLOAD_MB", "CLONE_MAX_UPLOAD_MB"),
+    )
+    clone_archive_max_upload_mb: int = Field(
+        default=250,
+        validation_alias=_kural_alias(
+            "KURAL_CLONE_ARCHIVE_MAX_UPLOAD_MB", "CLONE_ARCHIVE_MAX_UPLOAD_MB"
+        ),
+    )
 
     # Optional offline model packs for multilingual dubbing.
     # Kural never downloads these implicitly; point these at local model folders
@@ -90,9 +131,30 @@ class Settings(BaseSettings):
     model_pack_root: str = "~/.cache/kural"
     local_asr_engine: str = "auto"
     local_translation_engine: str = "auto"
-    transcribe_max_upload_mb: int = 250
+    transcribe_max_upload_mb: int = Field(
+        default=250,
+        validation_alias=_kural_alias("KURAL_TRANSCRIBE_MAX_UPLOAD_MB", "TRANSCRIBE_MAX_UPLOAD_MB"),
+    )
     # Cap on concurrent /api/transcribe/stream WebSocket sessions (DoS guard).
-    transcribe_stream_max_concurrent: int = 4
+    transcribe_stream_max_concurrent: int = Field(
+        default=4,
+        validation_alias=_kural_alias(
+            "KURAL_TRANSCRIBE_STREAM_MAX_CONCURRENT", "TRANSCRIBE_STREAM_MAX_CONCURRENT"
+        ),
+    )
+    # Per-frame and per-session ceilings for the streaming ASR WebSocket.
+    transcribe_stream_max_frame_bytes: int = Field(
+        default=1_048_576,  # 1 MiB per binary frame
+        validation_alias=_kural_alias(
+            "KURAL_TRANSCRIBE_STREAM_MAX_FRAME_BYTES", "TRANSCRIBE_STREAM_MAX_FRAME_BYTES"
+        ),
+    )
+    transcribe_stream_idle_timeout_s: float = Field(
+        default=120.0,
+        validation_alias=_kural_alias(
+            "KURAL_TRANSCRIBE_STREAM_IDLE_TIMEOUT_S", "TRANSCRIBE_STREAM_IDLE_TIMEOUT_S"
+        ),
+    )
     faster_whisper_model_dir: str = "~/.cache/kural/asr/faster-whisper"
     vosk_model_dir: str = "~/.cache/kural/asr/vosk"
     whisper_cpp_binary: str = ""

@@ -14,6 +14,25 @@ export function getApiKey(): string {
   return injected || process.env.NEXT_PUBLIC_KURAL_API_KEY || "";
 }
 
+/**
+ * WebSocket subprotocols that carry the API key OUT of the URL query string
+ * (a query param lands in proxy/access logs). The backend reads the key from
+ * the `kural-apikey.<base64url(key)>` token and selects the non-secret
+ * `kural.v1` subprotocol to complete negotiation. Returns [] when no key is
+ * configured (auth disabled), which is equivalent to offering no subprotocol.
+ */
+export function wsAuthProtocols(apiKey: string): string[] {
+  if (!apiKey) return [];
+  const bytes = new TextEncoder().encode(apiKey);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  const b64url = btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  return [`kural-apikey.${b64url}`, "kural.v1"];
+}
+
 type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 interface TauriGlobal {

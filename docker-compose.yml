@@ -19,6 +19,10 @@ services:
     environment:
       - TTS_ENGINE=kokoro-onnx
       - KURAL_API_KEY=${KURAL_API_KEY:-}
+      # Mirror the intended exposure so the app can fail closed: a non-loopback
+      # KURAL_BIND with no KURAL_API_KEY refuses to start (override with
+      # KURAL_ALLOW_INSECURE_NETWORK=1).
+      - KURAL_BIND=${KURAL_BIND:-127.0.0.1}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
