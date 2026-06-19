@@ -11,6 +11,6 @@ defusedxml>=0.7.1,<1.0
 # Lightweight kokoro TTS via ONNX runtime (no PyTorch dependency).
 # Pinned to a tested release; bump deliberately and run the integration test
 # (KURAL_RUN_INTEGRATION=1 pytest tests/test_engine_integration.py).
-kokoro-onnx==0.4.9
+kokoro-onnx==0.5.0
 # Supertonic is opt-in — pip-installing it pins numpy<2 which conflicts with
 # kokoro-onnx. See requirements-supertonic.txt for the install recipe.
