@@ -19,14 +19,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt requirements.lock requirements-clone.txt .
+COPY requirements.txt requirements.lock requirements-clone.txt requirements-clone.lock requirements-chatterbox.lock .
 # Base runtime installs from a fully hash-pinned lock (--require-hashes) for
 # reproducible builds + supply-chain integrity. Regenerate with `make lock`.
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
+# Clone layer (torch + Chatterbox deps) also hash-pinned. requirements-clone.lock
+# bundles torch==2.6.0+cpu (from the PyTorch index, hence --extra-index-url) and
+# every Chatterbox runtime dep; chatterbox-tts itself installs --no-deps because
+# its declared deps pin numpy<2 (conflicts with the base). Regenerate the lock
+# with `make lock-clone`.
 RUN if [ "$KURAL_FLAVOUR" = "clone" ]; then \
-        pip install --no-cache-dir torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu \
-        && pip install --no-cache-dir -r requirements-clone.txt \
-        && pip install --no-cache-dir --no-deps chatterbox-tts==0.1.7; \
+        pip install --no-cache-dir --require-hashes \
+            --extra-index-url https://download.pytorch.org/whl/cpu \
+            -r requirements-clone.lock \
+        && pip install --no-cache-dir --no-deps --require-hashes -r requirements-chatterbox.lock; \
     fi
 
 # ── runtime ────────────────────────────────────────────────────────────────
