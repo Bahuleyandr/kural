@@ -1,4 +1,4 @@
-.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test mcp-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check rc1-gate rc1-gate-full test
+.PHONY: backend-test backend-local-models backend-provision-local-models local-run local-run-setup cli-test mcp-test frontend-build frontend-lint frontend-unit frontend-e2e docker-build desktop-build desktop-installer desktop-runtime desktop-smoke desktop-release-check rc1-gate rc1-gate-full lock test
 
 backend-test:
 	cd backend && python -m pytest
@@ -62,5 +62,10 @@ rc1-gate:
 
 rc1-gate-full:
 	python scripts/rc1_release_gate.py --include-playwright --include-docker
+
+# Regenerate the hash-pinned base-runtime lock (cross-platform, --require-hashes).
+# Needs `uv`. The Dockerfile + desktop provisioner install from requirements.lock.
+lock:
+	cd backend && uv pip compile --generate-hashes --universal --python-version 3.11 requirements.txt -o requirements.lock
 
 test: backend-test cli-test mcp-test frontend-lint frontend-unit frontend-build

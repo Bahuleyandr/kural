@@ -170,6 +170,42 @@ git push origin main v0.2.1
 The release workflow triggers on `v*.*.*` tags. Track its run via
 `gh run watch`.
 
+## Dependency Locking (hash-pinned base runtime)
+
+The base backend runtime is installed from a fully hash-pinned, cross-platform
+lock so the shipped Docker image and desktop bundle are reproducible and
+supply-chain-tamper-evident:
+
+- `backend/requirements.txt` — human-edited inputs (source of truth).
+- `backend/requirements.lock` — generated, fully pinned + `--hash`ed
+  (`uv pip compile --generate-hashes --universal`). The Dockerfile and the
+  desktop provisioner install it with `pip install --require-hashes`.
+
+Regenerate after editing `requirements.txt`:
+
+```bash
+make lock          # needs `uv`; rewrites backend/requirements.lock
+```
+
+Validated 2026-06-19: `pip install --require-hashes -r requirements.lock`
+succeeds in `python:3.11-slim` and the lite Docker image builds from it.
+
+**Not yet locked (follow-up):** the optional **clone** layer (torch from the
+PyTorch CPU index + `requirements-clone.txt` + `chatterbox-tts --no-deps`) and
+the supertonic / local-models extras still install from their plain requirement
+files. The clone layer needs its own lock generated with the base as a
+constraint, e.g.:
+
+```bash
+cd backend && uv pip compile --generate-hashes --universal --python-version 3.11 \
+  -c requirements.lock requirements-clone.txt -o requirements-clone.lock
+# torch/torchaudio (==2.6.0+cpu) and chatterbox-tts==0.1.7 --no-deps stay
+# explicit installs; hash-pin torch from download.pytorch.org/whl/cpu separately.
+```
+
+Verify any clone lock with a full `KURAL_FLAVOUR=clone` image build (~2 GB)
+before wiring it into the Dockerfile.
+
 ## Known Gaps Until First Real Release
 
 - Updater key not yet generated (no `KURAL_UPDATER_PUBLIC_KEY` saved).

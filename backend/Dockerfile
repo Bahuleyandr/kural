@@ -19,8 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt requirements-clone.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.lock requirements-clone.txt .
+# Base runtime installs from a fully hash-pinned lock (--require-hashes) for
+# reproducible builds + supply-chain integrity. Regenerate with `make lock`.
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 RUN if [ "$KURAL_FLAVOUR" = "clone" ]; then \
         pip install --no-cache-dir torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu \
         && pip install --no-cache-dir -r requirements-clone.txt \
