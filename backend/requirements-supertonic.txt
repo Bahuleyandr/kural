@@ -11,5 +11,5 @@
 #   pip install -r requirements-supertonic.txt
 #   pip install --no-deps supertonic>=1.2.0
 #
-onnxruntime>=1.10.0
+onnxruntime>=1.27.0
 huggingface-hub>=0.10.0
